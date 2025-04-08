@@ -1,0 +1,10 @@
+google-api-python-client==2.88.0
+google-auth-httplib2==0.1.0
+google-auth-oauthlib==1.0.0
+transformers>=4.36.0
+# Using standard PyTorch with CUDA support for older Python versions
+torch>=2.0.0
+huggingface_hub>=0.17.3
+
+secure-smtplib>=0.1.1
+python-dotenv>=0.19.0

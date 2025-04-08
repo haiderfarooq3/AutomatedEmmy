@@ -1,0 +1,61 @@
+# OAuth Credentials and tokens
+credentials.json
+token.pickle
+*_token.json
+*.pem
+*.p12
+*.dat
+client_secret*.json
+
+# API keys and tokens
+.env
+.env.local
+.hf_token
+*.key
+keys.py
+config.py
+secrets.py
+
+# Python cache and virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# Notebook checkpoints
+.ipynb_checkpoints
+
+# Build/distribution
+build/
+dist/
+*.egg-info/
+
+# Logs and temporary files
+*.log
+*.swp
+*.swo
+tmp/
+temp/
+.DS_Store
+
+# Generated content and caches
+downloaded_models/
+.cache/
+*.db
+*.sqlite
+
+# IDE specific files
+.idea/
+.vscode/
+*.code-workspace
+.history/
+
+# OS specific
+Thumbs.db
