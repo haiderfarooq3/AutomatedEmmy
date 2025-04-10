@@ -1,3 +1,4 @@
+__import__('streamlit').config.set_option('server.fileWatcherType', 'none')
 import os
 import base64
 import pickle
@@ -130,43 +131,152 @@ class GmailAssistant:
             pass
         return datetime.now()
     
-    def sort_emails(self, labels=None):
-        """Sort emails into categories based on content and sender."""
-        if labels is None:
-            labels = {
-                'important': ['urgent', 'important', 'asap', 'deadline'],
-                'work': ['project', 'meeting', 'report', 'task'],
-                'personal': ['family', 'friend', 'holiday', 'vacation'],
-                'newsletters': ['newsletter', 'subscription', 'update', 'news']
-            }
+    def sort_emails(self, max_results=20):
+        """Sort emails into categories based on advanced rule-based logic."""
+        categories = {
+            'priority_inbox': [],
+            'main_inbox': [],
+            'urgent_alerts': [],
+            'basic_alerts': [],
+            'fyi_cc': [],
+            'billing_finance': [],
+            'scheduling_calendars': [],
+            'marketing_promotions': [],
+            'team_internal': [],
+            'projects_clients': [],
+            'needs_review': [],
+            'rules_in_training': []
+        }
         
-        unread_emails = self.get_unread_emails(max_results=20)
-        sorted_emails = {category: [] for category in labels.keys()}
+        unread_emails = self.get_unread_emails(max_results=max_results)
         
         for email in unread_emails:
             email_info = self.extract_email_info(email)
+            classifications = self._classify_email(email_info)
             
-            # Check which category the email belongs to
-            assigned = False
-            for category, keywords in labels.items():
-                for keyword in keywords:
-                    if (keyword.lower() in email_info['subject'].lower() or
-                        keyword.lower() in email_info['body'].lower()):
-                        sorted_emails[category].append(email_info)
-                        assigned = True
-                        break
+            # Debug statement to print classifications for specific subjects
+            if "warning" in email_info['subject'].lower() or "error" in email_info['subject'].lower() or "critical" in email_info['subject'].lower():
+                print(f"Classification for '{email_info['subject']}': {classifications}")
+            
+            # If email matches multiple categories, use the highest confidence one
+            if classifications:
+                best_match = max(classifications, key=lambda x: x[1])
+                category, confidence = best_match
                 
-                if assigned:
-                    break
-            
-            # If email doesn't match any category, put it in 'other'
-            if not assigned:
-                if 'other' not in sorted_emails:
-                    sorted_emails['other'] = []
-                sorted_emails['other'].append(email_info)
+                # If confidence is too low, put in needs_review
+                if confidence < 0.6:
+                    categories['needs_review'].append(email_info)
+                else:
+                    categories[category].append(email_info)
+            else:
+                # If no classification matches, put in needs_review
+                categories['needs_review'].append(email_info)
         
-        return sorted_emails
+        return categories
     
+    def _classify_email(self, email_info):
+        """
+        Analyze email subject and return list of (category, confidence) tuples based on keyword matching.
+        """
+        classifications = []
+        subject = email_info['subject'].lower()
+        
+        # Define keywords for each category
+        category_keywords = {
+            'priority_inbox': ['follow up', 'question', 'need', 'asap', 'approve', 'feedback', 'waiting on', 'deadline', 'important'],
+            'main_inbox': ['update', 'information', 'hello', 'hi', 'greetings', 'thanks', 'thank you'],
+            'urgent_alerts': ['warning', 'critical', 'error', 'alert', 'urgent', 'failed', 'down', 'issue', 'emergency', 'breach'],
+            'basic_alerts': ['report', 'summary', 'update', 'daily stats', 'weekly stats', 'monthly stats', 'notification'],
+            'fyi_cc': ['fyi', 'for your information', 'just letting you know', 'for your awareness', 'in case you missed'],
+            'billing_finance': ['invoice', 'payment', 'receipt', 'subscription', 'charge', 'statement', 'bill', 'transaction', 'finance'],
+            'scheduling_calendars': ['invite', 'meeting', 'calendar', 'schedule', 'appointment', 'call', 'booking', 'zoom', 'google meet', 'teams'],
+            'marketing_promotions': ['webinar', 'deal', 'promo', 'save', 'limited time', 'offer', 'discount', 'subscribe', 'newsletter'],
+            'team_internal': ['team', 'internal', 'quick question', 'can you check', 'office'],
+            'projects_clients': ['project', 'client', 'proposal', 'deliverable', 'scope', 'contract']
+        }
+        
+        # Simple matching based on subject keywords only
+        for category, keywords in category_keywords.items():
+            for keyword in keywords:
+                if keyword in subject:
+                    # Add category with fixed confidence
+                    classifications.append((category, 0.8))
+                    break  # Stop after first match in a category
+        
+        # If no classification found, mark as needs_review
+        if not classifications:
+            classifications.append(('needs_review', 0.7))
+            
+        return classifications
+    
+    def _extract_domain(self, email_address):
+        """Extract domain from email address."""
+        match = re.search(r'@([\w.-]+)', email_address)
+        if match:
+            return match.group(1).lower()
+        return ""
+    
+    def _is_direct_recipient(self, headers):
+        """Check if the email is directly addressed to the user."""
+        to_field = next((h['value'] for h in headers if h['name'].lower() == 'to'), '')
+        return self.user_email and self.user_email.lower() in to_field.lower()
+    
+    def _is_cc_recipient(self, headers):
+        """Check if the user is CC'd on the email."""
+        cc_field = next((h['value'] for h in headers if h['name'].lower() == 'cc'), '')
+        return self.user_email and self.user_email.lower() in cc_field.lower()
+    
+    def _get_email_headers(self, email_id):
+        """Get headers for an email by ID."""
+        try:
+            message = self.service.users().messages().get(
+                userId=self.user_id,
+                id=email_id,
+                format='metadata',
+                metadataHeaders=['To', 'Cc', 'From', 'Subject']
+            ).execute()
+            return message.get('payload', {}).get('headers', [])
+        except Exception as e:
+            print(f"Error fetching email headers: {e}")
+            return []
+    
+    def _is_known_client(self, domain):
+        """Check if domain belongs to a known client."""
+        # This would be populated with actual client domains
+        known_client_domains = ['client1.com', 'client2.org', 'client3.net']
+        return domain in known_client_domains
+    
+    def _is_known_sender(self, sender):
+        """Check if sender is a known contact."""
+        # This would be populated with known contacts or could check against contacts API
+        return True  # Placeholder implementation
+    
+    def _contains_urgent_language(self, subject, body):
+        """Check if email contains urgent language."""
+        urgent_terms = ['urgent', 'asap', 'immediately', 'emergency', 'critical']
+        for term in urgent_terms:
+            if term in subject.lower() or term in body.lower():
+                return True
+        return False
+    
+    def _is_alert_email(self, subject, body):
+        """Check if email is an alert notification."""
+        alert_terms = ['alert', 'notification', 'warning', 'error', 'failed']
+        for term in alert_terms:
+            if term in subject.lower():
+                return True
+        return False
+    
+    def _get_client_domains(self):
+        """Return list of client domains."""
+        # This would be populated with actual client domains
+        return ['client1.com', 'client2.org', 'client3.net']
+    
+    def _get_project_codes(self):
+        """Return list of project codes."""
+        # This would be populated with actual project codes
+        return ['proj-001', 'proj-002', 'client-a-website', 'seo-campaign']
+
     def create_draft(self, to, subject, body):
         """Create a draft email."""
         try:
@@ -338,10 +448,10 @@ class GmailAssistant:
         """Generate an email using the Hugging Face model with context from original email."""
         if not self.hf_model:
             print("Hugging Face model not initialized. Using default email text.")
-            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon."
+            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
         
         # Create a prompt for the model with context from original email
-        prompt = f"Write a professional email response. I am Haider Farooq working for Arzid pvt ltd. We specialize in data projects. reply to emails accrodingly.Make sure proper formatting is done"
+        prompt = f"Write a professional email response. I am Emmy, an AI email assistant. reply to emails accordingly. Make sure proper formatting is done"
         if recipient_name:
             prompt += f" to {recipient_name}"
         if original_subject:
@@ -358,14 +468,13 @@ class GmailAssistant:
         
         generated_text = self.generate_text(prompt, max_length=500)
         if not generated_text:
-            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon."
+            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
             
         # Clean up the generated text to extract only the email body
         clean_email = self._extract_email_body(generated_text)
         
-        # Replace [Your Name] placeholder with user's email
-        if self.user_email:
-            clean_email = clean_email.replace("[Your Name]", self.user_email)
+        # Replace [Your Name] placeholder with Emmy
+        clean_email = clean_email.replace("[Your Name]", "Emmy")
         
         return clean_email
     
@@ -489,7 +598,7 @@ def main():
     
     # Process important emails and send automatic replies
     print("\n--- Processing Important Emails ---")
-    important_emails = sorted_emails.get('important', [])
+    important_emails = sorted_emails.get('priority_inbox', [])
     if not important_emails:
         print("No important emails to process.")
     else:
@@ -511,7 +620,7 @@ def main():
             
             print("Sending response...")
             reply_subject = f"Re: {email['subject']}"
-            assistant.send_email(
+            response = assistant.send_email(
                 to=sender_email,
                 subject=reply_subject,
                 body=response_body
@@ -522,6 +631,9 @@ def main():
             print(f"✓ Response sent to {sender_email} and email marked as read")
 
     print("\nEmail automation completed successfully!")
+    
+    # Return for Streamlit integration
+    return sorted_emails
 
 if __name__ == '__main__':
     main()

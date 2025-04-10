@@ -7,6 +7,8 @@ token.pickle
 *.dat
 client_secret*.json
 
+
+
 # API keys and tokens
 .env
 .env.local
@@ -59,3 +61,44 @@ downloaded_models/
 
 # OS specific
 Thumbs.db
+
+# Documentation
+documentation.md
+
+# Streamlit specific
+.streamlit/secrets.toml
+
+# Virtual environment packages
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Local development
+local_settings.py
+production_settings.py
+
+# Backup files
+*.bak
+*~
+*.backup
+
+# Testing
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Model checkpoints and weights
+*.pth
+*.pt
+*.h5
+*.ckpt
+*.weights
+model_weights/
+pretrained_models/
+
+# Large datasets
+data/
+datasets/
+*.csv
+*.xlsx
+*.json
