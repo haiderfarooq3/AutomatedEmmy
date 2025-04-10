@@ -5,7 +5,12 @@ import torch
 from datetime import datetime
 import pandas as pd
 import time
+import openai
+from dotenv import load_dotenv
 from Automation import GmailAssistant, SCOPES
+
+# Load environment variables
+load_dotenv()
 
 # Set page configuration and styling
 st.set_page_config(
@@ -109,30 +114,32 @@ def authenticate():
             return None
 
 def setup_model():
-    """Set up the Hugging Face model."""
+    """Set up the OpenAI model."""
     if not st.session_state.hf_model_loaded:
-        with st.spinner("Loading language model... This may take a few minutes..."):
+        with st.spinner("Setting up OpenAI integration... This may take a moment..."):
             try:
-                model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-                hf_token = st.session_state.get('hf_token', None)
+                # Get OpenAI API key from session state or environment
+                openai_key = st.session_state.get('openai_api_key', None)
+                # Get selected model from session state
+                selected_model = st.session_state.get('openai_model', None)
                 
-                success = st.session_state.assistant.setup_huggingface(
-                    model_name=model_name,
-                    hf_token=hf_token,
+                success = st.session_state.assistant.setup_openai(
+                    api_key=openai_key,
+                    model=selected_model,  # Pass the selected model here
                     no_prompt=True
                 )
                 
                 if success:
                     st.session_state.hf_model_loaded = True
-                    st.success("Language model loaded successfully!")
+                    st.success("OpenAI integration set up successfully!")
                     time.sleep(0.5)  # Brief pause to show success message
                     st.rerun()  # Refresh UI to update
                     return True
                 else:
-                    st.warning("Model loading failed. Some features will be limited.")
+                    st.warning("OpenAI setup failed. Please check your API key.")
                     return False
             except Exception as e:
-                st.error(f"Error loading model: {e}")
+                st.error(f"Error setting up OpenAI: {e}")
                 return False
     return True
 
@@ -431,7 +438,7 @@ def display_email_details():
             
             if st.button("Generate Response", use_container_width=True):
                 if not st.session_state.hf_model_loaded:
-                    st.warning("Language model not loaded. Using a simple response template.")
+                    st.warning("OpenAI integration not set up. Using a simple response template.")
                 generate_email_response(email)
         
         # Display email body (sanitize it too)
@@ -502,17 +509,25 @@ def main():
             user_email = st.session_state.assistant.get_user_email()
             st.success(f"Emmy authenticated as: {user_email}")
             
-            # HuggingFace settings
+            # OpenAI API settings
             st.markdown("### Emmy's AI Brain")
-            hf_token = st.text_input("HuggingFace Token (optional)", type="password")
-            if hf_token:
-                st.session_state.hf_token = hf_token
+            openai_api_key = st.text_input("OpenAI API Key", type="password", 
+                                          value=os.getenv("OPENAI_API_KEY", ""))
+            if openai_api_key:
+                st.session_state.openai_api_key = openai_api_key
+            
+            openai_model = st.selectbox(
+                "Select OpenAI Model",
+                ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
+                index=0
+            )
+            st.session_state.openai_model = openai_model
             
             if not st.session_state.hf_model_loaded:
-                if st.button("Load Emmy's AI Brain"):
+                if st.button("Connect to OpenAI API"):
                     setup_model()
             else:
-                st.success("Emmy's AI brain is loaded and ready!")
+                st.success("Emmy's AI brain is connected and ready!")
             
             # Email refresh
             st.markdown("### Email Management")

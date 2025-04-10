@@ -11,8 +11,16 @@ import re
 from datetime import datetime
 import argparse
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from huggingface_hub import login
+import openai
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get OpenAI API key from environment
+openai.api_key = os.getenv("OPENAI_API_KEY")
+# Default model from environment or fallback to GPT-3.5-Turbo
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 
 # Define the scopes required for Gmail API
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify',
@@ -22,17 +30,15 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify',
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Gmail Automation Tool')
 parser.add_argument('--no-prompt', action='store_true', help='Run without interactive prompts')
-parser.add_argument('--hf-token', type=str, help='Hugging Face token', default=None)
+parser.add_argument('--openai-key', type=str, help='OpenAI API key', default=None)
 args = parser.parse_args()
 
 class GmailAssistant:
     def __init__(self):
         self.service = self.authenticate()
         self.user_id = 'me'  # 'me' refers to the authenticated user
-        self.hf_model = None
-        self.hf_tokenizer = None
         self.user_email = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.openai_model = OPENAI_MODEL
     
     def authenticate(self):
         """Authenticate with Gmail API and return the service object."""
@@ -209,74 +215,6 @@ class GmailAssistant:
             
         return classifications
     
-    def _extract_domain(self, email_address):
-        """Extract domain from email address."""
-        match = re.search(r'@([\w.-]+)', email_address)
-        if match:
-            return match.group(1).lower()
-        return ""
-    
-    def _is_direct_recipient(self, headers):
-        """Check if the email is directly addressed to the user."""
-        to_field = next((h['value'] for h in headers if h['name'].lower() == 'to'), '')
-        return self.user_email and self.user_email.lower() in to_field.lower()
-    
-    def _is_cc_recipient(self, headers):
-        """Check if the user is CC'd on the email."""
-        cc_field = next((h['value'] for h in headers if h['name'].lower() == 'cc'), '')
-        return self.user_email and self.user_email.lower() in cc_field.lower()
-    
-    def _get_email_headers(self, email_id):
-        """Get headers for an email by ID."""
-        try:
-            message = self.service.users().messages().get(
-                userId=self.user_id,
-                id=email_id,
-                format='metadata',
-                metadataHeaders=['To', 'Cc', 'From', 'Subject']
-            ).execute()
-            return message.get('payload', {}).get('headers', [])
-        except Exception as e:
-            print(f"Error fetching email headers: {e}")
-            return []
-    
-    def _is_known_client(self, domain):
-        """Check if domain belongs to a known client."""
-        # This would be populated with actual client domains
-        known_client_domains = ['client1.com', 'client2.org', 'client3.net']
-        return domain in known_client_domains
-    
-    def _is_known_sender(self, sender):
-        """Check if sender is a known contact."""
-        # This would be populated with known contacts or could check against contacts API
-        return True  # Placeholder implementation
-    
-    def _contains_urgent_language(self, subject, body):
-        """Check if email contains urgent language."""
-        urgent_terms = ['urgent', 'asap', 'immediately', 'emergency', 'critical']
-        for term in urgent_terms:
-            if term in subject.lower() or term in body.lower():
-                return True
-        return False
-    
-    def _is_alert_email(self, subject, body):
-        """Check if email is an alert notification."""
-        alert_terms = ['alert', 'notification', 'warning', 'error', 'failed']
-        for term in alert_terms:
-            if term in subject.lower():
-                return True
-        return False
-    
-    def _get_client_domains(self):
-        """Return list of client domains."""
-        # This would be populated with actual client domains
-        return ['client1.com', 'client2.org', 'client3.net']
-    
-    def _get_project_codes(self):
-        """Return list of project codes."""
-        # This would be populated with actual project codes
-        return ['proj-001', 'proj-002', 'client-a-website', 'seo-campaign']
-
     def create_draft(self, to, subject, body):
         """Create a draft email."""
         try:
@@ -363,93 +301,97 @@ class GmailAssistant:
             print(f'Error sending email: {e}')
             return None
     
-    def setup_huggingface(self, model_name="Qwen/Qwen2.5-0.5B-Instruct", hf_token=None, no_prompt=False):
-        """Set up Hugging Face model for content generation."""
+    def setup_openai(self, api_key=None, model=None, no_prompt=False):
+        """Set up OpenAI for content generation."""
         try:
-            if hf_token:
-                login(hf_token)
-                print("Logged in to Hugging Face successfully!")
+            # Prioritize environment variables if no explicit values are provided
+            if not api_key:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    print("[ERROR] OpenAI API key not found in environment variables")
+                    return False
+                print(f"Using OpenAI API key from environment: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
+
+            if not model:
+                model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+                print(f"Using OpenAI model from environment: {model}")
             
-            print(f"Loading model {model_name}...")
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(model_name)
+            # Set the API key and model
+            openai.api_key = api_key.strip()  # Remove any whitespace that might cause issues
+            self.openai_model = model
             
-            # Handle potential SDPA warning by setting attn_implementation
-            print("Note: Using eager attention implementation to avoid SDPA warnings")
+            # Debug information
+            print(f"[DEBUG] Setting up OpenAI with model: {self.openai_model}")
             
-            # Load model with appropriate settings
-            if torch.cuda.is_available():
-                print("Loading model on GPU...")
-                try:
-                    self.hf_model = AutoModelForCausalLM.from_pretrained(
-                        model_name,
-                        torch_dtype=torch.float16,
-                        device_map="auto",
-                        attn_implementation="eager"  # Use eager implementation to avoid SDPA warnings
-                    )
-                except Exception as e:
-                    print(f"Failed with float16, falling back to float32: {e}")
-                    self.hf_model = AutoModelForCausalLM.from_pretrained(
-                        model_name,
-                        device_map="auto",
-                        attn_implementation="eager"  # Use eager implementation to avoid SDPA warnings
-                    )
-            else:
-                print("Loading model on CPU...")
-                self.hf_model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    low_cpu_mem_usage=True,
-                    attn_implementation="eager"  # Use eager implementation to avoid SDPA warnings
-                ).to(self.device)
+            # Verify API key is working with a simple test
+            if not no_prompt:
+                print(f"Testing OpenAI API connection...")
             
-            print(f"Model {model_name} loaded successfully on {self.device}!")
-            return True
+            # Try a simple completion to test the API key
+            print(f"[DEBUG] Sending test request to OpenAI API...")
+            print(f"[DEBUG] API Key valid format check: {bool(api_key) and len(api_key) > 20}")
+            
+            # Add more detailed error handling for the API request
+            try:
+                response = openai.ChatCompletion.create(
+                    model=self.openai_model,
+                    messages=[{"role": "user", "content": "Hello, this is a test."}],
+                    max_tokens=10
+                )
+                print(f"[DEBUG] Received response: {response.choices[0].message.content}")
+                
+                if not no_prompt:
+                    print("✓ OpenAI API connection successful!")
+                
+                return True
+            except openai.error.AuthenticationError as auth_err:
+                print(f"[ERROR] Authentication failed: {auth_err}")
+                print("[HINT] Your API key may be invalid or expired. Check your .env file.")
+                return False
+            except openai.error.RateLimitError:
+                print("[ERROR] Rate limit exceeded. Please try again later.")
+                # We'll still return True since the API key is valid
+                return True
+            except openai.error.InvalidRequestError as req_err:
+                print(f"[ERROR] Invalid request: {req_err}")
+                # If it's a model availability issue, suggest alternatives
+                if "model" in str(req_err).lower():
+                    print("[HINT] The specified model may not be available. Try using 'gpt-3.5-turbo' instead.")
+                return False
+            
         except Exception as e:
-            print(f"Error setting up Hugging Face model: {e}")
+            print(f"[ERROR] Failed to set up OpenAI: {e}")
+            print("[DEBUG] Exception type:", type(e).__name__)
+            print("[HINT] Check that your .env file is properly formatted and in the correct location.")
+            print("[HINT] The .env file should contain: OPENAI_API_KEY=your_api_key_here")
             return False
     
-    def generate_text(self, prompt, max_length=100):
-        """Generate text using the loaded Hugging Face model."""
-        if not self.hf_model or not self.hf_tokenizer:
-            print("Hugging Face model not initialized. Call setup_huggingface() first.")
-            return None
-        
+    def generate_text(self, prompt, max_tokens=500, temperature=0.7):
+        """Generate text using OpenAI."""
         try:
-            # Move inputs to device (GPU if available)
-            inputs = self.hf_tokenizer(prompt, return_tensors="pt").to(self.device)
+            print(f"[DEBUG] Generating text with {self.openai_model}, max_tokens={max_tokens}, temp={temperature}")
+            print(f"[DEBUG] Prompt: {prompt[:50]}..." if len(prompt) > 50 else f"[DEBUG] Prompt: {prompt}")
             
-            # Configure generation parameters
-            generation_config = {
-                "max_length": max_length,
-                "num_return_sequences": 1,
-                "temperature": 0.7,
-                "do_sample": True,
-                "no_repeat_ngram_size": 2
-            }
+            response = openai.ChatCompletion.create(
+                model=self.openai_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                n=1
+            )
             
-            # Generate text with memory optimization
-            with torch.no_grad():  # Disable gradient calculation for inference
-                if self.device.type == "cuda":
-                    # Use efficient generation for CUDA
-                    torch.cuda.empty_cache()  # Clear GPU memory before generation
-                
-                # Generate text
-                outputs = self.hf_model.generate(**inputs, **generation_config)
-                
-            # Move outputs back to CPU for tokenizer processing
-            outputs = outputs.cpu()
+            # Extract the generated text from the response
+            generated_text = response.choices[0].message.content
+            print(f"[DEBUG] Generation successful: {len(generated_text)} characters")
+            print(f"[DEBUG] First 50 chars: {generated_text[:50]}..." if len(generated_text) > 50 else f"[DEBUG] Content: {generated_text}")
             
-            generated_text = self.hf_tokenizer.decode(outputs[0], skip_special_tokens=True)
             return generated_text
         except Exception as e:
-            print(f"Error generating text: {e}")
+            print(f"[ERROR] Text generation failed: {e}")
             return None
     
     def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
-        """Generate an email using the Hugging Face model with context from original email."""
-        if not self.hf_model:
-            print("Hugging Face model not initialized. Using default email text.")
-            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
-        
+        """Generate an email using OpenAI with context from original email."""
         # Create a prompt for the model with context from original email
         prompt = f"Write a professional email response. I am Haider Farooq a Data Scientist. reply to emails accordingly. Make sure proper formatting is done"
         if recipient_name:
@@ -460,13 +402,13 @@ class GmailAssistant:
         # Add context from original email if available
         if original_content:
             # Truncate the content if it's too long to fit in the prompt
-            max_context_length = 200
+            max_context_length = 500
             context = original_content[:max_context_length] + "..." if len(original_content) > max_context_length else original_content
             prompt += f"\n\nOriginal email content:\n{context}\n\nWrite a professional and helpful response:"
         else:
             prompt += ":\n\n"
         
-        generated_text = self.generate_text(prompt, max_length=500)
+        generated_text = self.generate_text(prompt, max_tokens=500)
         if not generated_text:
             return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
             
@@ -540,54 +482,31 @@ class GmailAssistant:
             return False
 
 def main():
-    # GPU diagnostics
-    print("\n--- GPU Diagnostics ---")
+    # GPU diagnostics (not directly relevant for OpenAI API but kept for info)
+    print("\n--- System Information ---")
     print(f"PyTorch version: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
-    print(f"CUDA version: {torch.version.cuda if torch.cuda.is_available() else 'Not available'}")
     if torch.cuda.is_available():
-        print(f"Device count: {torch.cuda.device_count()}")
-        print(f"Device name: {torch.cuda.get_device_name(0)}")
-    else:
-        print("No GPU detected. Check CUDA installation or use a smaller model.")
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"GPU device: {torch.cuda.get_device_name(0)}")
     print("---------------------\n")
     
+    print("[DEBUG] Initializing Gmail Assistant...")
     assistant = GmailAssistant()
     
     # Get user's email address
     user_email = assistant.get_user_email()
     print(f"Authenticated as: {user_email}")
     
-    # Get Hugging Face token
-    hf_token = args.hf_token
-    if not args.no_prompt and not hf_token:
-        try:
-            hf_token = input("Enter your Hugging Face token (press Enter to skip): ").strip() or None
-        except KeyboardInterrupt:
-            print("\nOperation cancelled by user. Using model without token.")
-            hf_token = None
+    # Setup OpenAI directly from environment without prompting the user
+    print("[DEBUG] Setting up OpenAI from environment variables...")
+    setup_success = assistant.setup_openai(no_prompt=args.no_prompt)
     
-    # Verify Hugging Face login if token is provided
-    if hf_token:
-        try:
-            login(hf_token)
-            print("✓ Successfully logged in to Hugging Face")
-        except Exception as e:
-            print(f"! Error logging in to Hugging Face: {e}")
-            print("  Continuing with limited access...")
-    else:
-        print("! No Hugging Face token provided. Some models may not be accessible.")
+    if not setup_success:
+        print("[ERROR] Failed to initialize OpenAI API. Please check your .env file contains a valid OPENAI_API_KEY.")
+        return
     
-    # Use only the Qwen model
-    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-    print(f"Using model: {model_name}")
-    
-    assistant.setup_huggingface(
-        model_name=model_name,
-        hf_token=hf_token, 
-        no_prompt=args.no_prompt
-    )
-    
+    print("[DEBUG] Starting email sorting...")
     # Sort emails
     sorted_emails = assistant.sort_emails()
     print("--- Sorted Emails ---")
@@ -597,28 +516,28 @@ def main():
             print(f"  - {email['subject']} (From: {email['sender']})")
     
     # Process important emails and send automatic replies
-    print("\n--- Processing Important Emails ---")
+    print("\n[DEBUG] Processing priority emails...")
     important_emails = sorted_emails.get('priority_inbox', [])
     if not important_emails:
         print("No important emails to process.")
     else:
         print(f"Found {len(important_emails)} important emails requiring responses.")
         
-        for email in important_emails:
-            print(f"\nProcessing: {email['subject']}")
+        for idx, email in enumerate(important_emails):
+            print(f"\n[DEBUG] Processing email {idx+1}/{len(important_emails)}: {email['subject']}")
             sender_email = assistant.extract_email(email['sender'])
             sender_name = assistant.extract_name(email['sender'])
             
             # Generate appropriate response based on email content
-            device_info = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
-            print(f"Generating response to {sender_name} ({sender_email}) using {device_info}...")
+            print(f"[DEBUG] Generating response to {sender_name} ({sender_email}) using OpenAI...")
             response_body = assistant.generate_email(
                 recipient_name=sender_name,
                 original_subject=email['subject'],
                 original_content=email['body']
             )
             
-            print("Sending response...")
+            print("[DEBUG] Response generated successfully.")
+            print(f"[DEBUG] Sending email to {sender_email}...")
             reply_subject = f"Re: {email['subject']}"
             response = assistant.send_email(
                 to=sender_email,
@@ -627,10 +546,11 @@ def main():
             )
             
             # Mark the email as read after processing
+            print(f"[DEBUG] Marking email {email['id']} as read...")
             assistant.mark_as_read(email['id'])
             print(f"✓ Response sent to {sender_email} and email marked as read")
 
-    print("\nEmail automation completed successfully!")
+    print("\n[DEBUG] Email automation process completed!")
     
     # Return for Streamlit integration
     return sorted_emails
