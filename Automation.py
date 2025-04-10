@@ -451,7 +451,7 @@ class GmailAssistant:
             return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
         
         # Create a prompt for the model with context from original email
-        prompt = f"Write a professional email response. I am Emmy, an AI email assistant. reply to emails accordingly. Make sure proper formatting is done"
+        prompt = f"Write a professional email response. I am Haider Farooq a Data Scientist. reply to emails accordingly. Make sure proper formatting is done"
         if recipient_name:
             prompt += f" to {recipient_name}"
         if original_subject:
