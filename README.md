@@ -1,3 +1,5 @@
+## Old details, needs updating
+
 # Gmail Automation Assistant
 
 ## Overview
@@ -9,7 +11,6 @@ This tool provides automated email handling with AI-powered responses using the 
 The application includes multiple performance optimizations:
 
 - **Batch Processing**: Processes emails in batches to reduce API overhead
-- **Parallel Execution**: Uses multi-threading for concurrent operations
 - **Intelligent Caching**: Caches API results and generated responses to reduce redundant work
 - **Field Filtering**: Reduces data transfer by only requesting necessary fields
 - **GPU Acceleration**: Automatically uses CUDA if available
