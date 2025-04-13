@@ -300,9 +300,9 @@ def display_emails():
         'fyi_cc': 'FYI / CC',
         'billing_finance': 'Billing & Finance',
         'scheduling_calendars': 'Scheduling',
-        'marketing_promotions': 'Marketing',
         'team_internal': 'Team Internal',
         'projects_clients': 'Projects & Clients',
+        'marketing_promotions': 'Marketing',
         'needs_review': 'Needs Review',
         'rules_in_training': 'Rules in Training'
     }
@@ -487,11 +487,17 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        # Custom logo or default Gmail logo
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Gmail_icon_%282020%29.svg/2560px-Gmail_icon_%282020%29.svg.png", width=100)
+        # Add Emmy Settings header before the logo
         st.markdown("## Emmy Settings")
         
-        # Authentication
+        # Display the logo after the header
+        logo_path = os.path.join(os.path.dirname(__file__), 'Logo.png')
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=300, use_container_width=False)
+        else:
+            st.warning("Logo image not found. Please make sure 'Logo.png' exists in the application directory.")
+        
+        # Authentication - moved higher
         if not st.session_state.authenticated:
             st.markdown("### Authentication")
             st.markdown(f"Emmy needs access to your Gmail account with the following permissions:")

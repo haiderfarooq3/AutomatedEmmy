@@ -480,6 +480,20 @@ class GmailAssistant:
         except Exception as e:
             print(f"Error marking email as read: {e}")
             return False
+            
+    def display_logo(self):
+        """Display the logo from the Logo.png file."""
+        logo_path = os.path.join(os.path.dirname(__file__), 'Logo.png')
+        if os.path.exists(logo_path):
+            try:
+                # For console output, just notify that the logo exists
+                print(f"[INFO] Logo found at: {logo_path}")
+                return logo_path
+            except Exception as e:
+                print(f"[ERROR] Failed to load logo: {e}")
+        else:
+            print(f"[WARNING] Logo file not found at: {logo_path}")
+        return None
 
 def main():
     # GPU diagnostics (not directly relevant for OpenAI API but kept for info)
@@ -493,6 +507,11 @@ def main():
     
     print("[DEBUG] Initializing Gmail Assistant...")
     assistant = GmailAssistant()
+    
+    # Display the logo
+    logo_path = assistant.display_logo()
+    if logo_path:
+        print(f"[INFO] Using logo from: {logo_path}")
     
     # Get user's email address
     user_email = assistant.get_user_email()
