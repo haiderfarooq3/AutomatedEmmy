@@ -33,3 +33,21 @@ CATEGORY_DISPLAY_NAMES = {
     'needs_review': 'Needs Review',
     'rules_in_training': 'Training'
 }
+
+# Auto-response categories options
+AUTO_RESPONSE_CATEGORIES = {
+    'Priority Inbox Only': ['priority_inbox'],
+    'All Important': ['priority_inbox', 'urgent_alerts', 'team_internal', 'projects_clients'],
+    'Business Related': ['priority_inbox', 'billing_finance', 'team_internal', 'projects_clients'],
+    'Everything': 'all',
+    'Custom': []  # To be configured per user preference
+}
+
+# Auto-response waiting time options (in minutes)
+AUTO_RESPONSE_WAITING_TIMES = {
+    'Immediate': 0,
+    'Quick': 2,
+    'Standard': 5,
+    'Delayed': 15,
+    'Custom': 0  # To be configured per user preference
+}

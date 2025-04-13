@@ -13,6 +13,9 @@ import argparse
 import torch
 import openai
 from dotenv import load_dotenv
+import json
+import time
+from constants import CATEGORY_DISPLAY_NAMES, AUTO_RESPONSE_CATEGORIES, AUTO_RESPONSE_WAITING_TIMES
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +42,23 @@ class GmailAssistant:
         self.user_id = 'me'  # 'me' refers to the authenticated user
         self.user_email = None
         self.openai_model = OPENAI_MODEL
+        self.config = self.load_config()
+    
+    def load_config(self):
+        """Load configuration from config.json file."""
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        try:
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+            return {
+                "auto_response": {
+                    "enabled": False,
+                    "categories": "Priority Inbox Only",
+                    "waiting_time": 5
+                }
+            }
     
     def authenticate(self):
         """Authenticate with Gmail API and return the service object."""
@@ -239,19 +259,58 @@ class GmailAssistant:
     
     def auto_respond(self, email_info, template=None):
         """Generate and send an automatic response to an email."""
+        # Skip auto-response if disabled in config
+        if not self.config.get('auto_response', {}).get('enabled', False):
+            print("[INFO] Auto-response is disabled in config")
+            return None
+            
+        # Get the configured categories for auto-responses
+        auto_response_category = self.config.get('auto_response', {}).get('categories', 'Priority Inbox Only')
+        categories_to_respond = AUTO_RESPONSE_CATEGORIES.get(auto_response_category, ['priority_inbox'])
+        
+        # Get the waiting time before sending response
+        waiting_time = self.config.get('auto_response', {}).get('waiting_time', 5)
+        if isinstance(waiting_time, str):
+            waiting_time = AUTO_RESPONSE_WAITING_TIMES.get(waiting_time, 5)
+        
+        # Wait the configured amount of time (converted to seconds)
+        if waiting_time > 0:
+            print(f"[INFO] Waiting {waiting_time} minutes before sending response...")
+            time.sleep(waiting_time * 60)
+        
+        # Get the user's name for signature
+        user_name = self.get_user_name()
+        
         if template is None:
             # Default response template
             template = (
                 f"Hi {self.extract_name(email_info['sender'])},\n\n"
                 "Thank you for your email. I've received your message and will get back to you soon.\n\n"
                 "Best regards,\n"
-                "Your Name"
+                f"{user_name}"
             )
         
         to = self.extract_email(email_info['sender'])
         subject = f"Re: {email_info['subject']}"
         
-        return self.create_draft(to, subject, template)
+        # Generate the response instead of using a template
+        response_body = self.generate_email(
+            recipient_name=self.extract_name(email_info['sender']),
+            original_subject=email_info['subject'],
+            original_content=email_info['body']
+        )
+        
+        if response_body:
+            # Send email directly rather than creating a draft
+            send_result = self.send_email(
+                to=to,
+                subject=subject,
+                body=response_body
+            )
+            return send_result
+        else:
+            # Fall back to template if generation fails
+            return self.create_draft(to, subject, template)
     
     def extract_name(self, sender):
         """Extract name from email sender format: 'Name <email@example.com>'"""
@@ -467,6 +526,24 @@ class GmailAssistant:
                 print(f"Error getting user email: {e}")
                 return ''
         return self.user_email
+
+    def get_user_name(self):
+        """Get the user's display name from config or default to their email username."""
+        user_config = self.config.get('user', {})
+        user_name = user_config.get('name')
+        
+        if not user_name:
+            # If no user name configured, try to extract it from email
+            user_email = self.get_user_email()
+            if user_email and '@' in user_email:
+                # Use part before @ as username
+                user_name = user_email.split('@')[0]
+                # Capitalize first letter of each word
+                user_name = ' '.join(word.capitalize() for word in user_name.split('.'))
+            else:
+                user_name = "Emmy User"
+        
+        return user_name
     
     def mark_as_read(self, email_id):
         """Mark an email as read by removing the UNREAD label."""
@@ -534,40 +611,70 @@ def main():
         for email in emails:
             print(f"  - {email['subject']} (From: {email['sender']})")
     
-    # Process important emails and send automatic replies
-    print("\n[DEBUG] Processing priority emails...")
-    important_emails = sorted_emails.get('priority_inbox', [])
-    if not important_emails:
-        print("No important emails to process.")
-    else:
-        print(f"Found {len(important_emails)} important emails requiring responses.")
+    # Process emails based on auto-response settings from config
+    auto_response_config = assistant.config.get('auto_response', {})
+    auto_response_enabled = auto_response_config.get('enabled', False)
+    
+    print(f"\n[DEBUG] Auto-response enabled: {auto_response_enabled}")
+    
+    if auto_response_enabled:
+        auto_response_categories = auto_response_config.get('categories', 'Priority Inbox Only')
+        waiting_time = auto_response_config.get('waiting_time', 5)
         
-        for idx, email in enumerate(important_emails):
-            print(f"\n[DEBUG] Processing email {idx+1}/{len(important_emails)}: {email['subject']}")
-            sender_email = assistant.extract_email(email['sender'])
-            sender_name = assistant.extract_name(email['sender'])
-            
-            # Generate appropriate response based on email content
-            print(f"[DEBUG] Generating response to {sender_name} ({sender_email}) using OpenAI...")
-            response_body = assistant.generate_email(
-                recipient_name=sender_name,
-                original_subject=email['subject'],
-                original_content=email['body']
-            )
-            
-            print("[DEBUG] Response generated successfully.")
-            print(f"[DEBUG] Sending email to {sender_email}...")
-            reply_subject = f"Re: {email['subject']}"
-            response = assistant.send_email(
-                to=sender_email,
-                subject=reply_subject,
-                body=response_body
-            )
-            
-            # Mark the email as read after processing
-            print(f"[DEBUG] Marking email {email['id']} as read...")
-            assistant.mark_as_read(email['id'])
-            print(f"✓ Response sent to {sender_email} and email marked as read")
+        print(f"[INFO] Auto-response is enabled for: {auto_response_categories}")
+        print(f"[INFO] Waiting time before response: {waiting_time} minutes")
+        
+        # Get categories to process
+        categories_to_respond = AUTO_RESPONSE_CATEGORIES.get(auto_response_categories, ['priority_inbox'])
+        process_all = categories_to_respond == 'all'
+        
+        print(f"[DEBUG] Categories to auto-respond: {categories_to_respond if categories_to_respond != 'all' else 'ALL'}")
+        
+        # Process emails in the selected categories
+        processed_emails = 0
+        for category, emails in sorted_emails.items():
+            if process_all or category in categories_to_respond:
+                print(f"[INFO] Processing emails in {CATEGORY_DISPLAY_NAMES.get(category, category)}")
+                
+                for idx, email in enumerate(emails):
+                    print(f"\n[DEBUG] Auto-responding to email {idx+1}/{len(emails)}: {email['subject']}")
+                    
+                    # Get recipient information
+                    sender_email = assistant.extract_email(email['sender'])
+                    sender_name = assistant.extract_name(email['sender'])
+                    
+                    # Wait specified time if needed (converted to seconds)
+                    if waiting_time > 0:
+                        print(f"[INFO] Waiting {waiting_time} minutes before sending response...")
+                        time.sleep(waiting_time * 60)
+                    
+                    # Generate response
+                    print(f"[DEBUG] Generating response to {sender_name} ({sender_email}) using OpenAI...")
+                    response_body = assistant.generate_email(
+                        recipient_name=sender_name,
+                        original_subject=email['subject'],
+                        original_content=email['body']
+                    )
+                    
+                    # Send response
+                    print("[DEBUG] Response generated successfully.")
+                    print(f"[DEBUG] Sending email to {sender_email}...")
+                    reply_subject = f"Re: {email['subject']}"
+                    response = assistant.send_email(
+                        to=sender_email,
+                        subject=reply_subject,
+                        body=response_body
+                    )
+                    
+                    # Mark as read after processing
+                    print(f"[DEBUG] Marking email {email['id']} as read...")
+                    assistant.mark_as_read(email['id'])
+                    print(f"✓ Response sent to {sender_email} and email marked as read")
+                    processed_emails += 1
+        
+        print(f"[INFO] Auto-responded to {processed_emails} emails from {len(categories_to_respond) if categories_to_respond != 'all' else 'all'} categories")
+    else:
+        print("[INFO] Auto-response is disabled in config")
 
     print("\n[DEBUG] Email automation process completed!")
     

@@ -6,8 +6,10 @@ from datetime import datetime
 import pandas as pd
 import time
 import openai
+import json
 from dotenv import load_dotenv
 from Automation import GmailAssistant, SCOPES
+from constants import CATEGORY_DISPLAY_NAMES, AUTO_RESPONSE_CATEGORIES, AUTO_RESPONSE_WAITING_TIMES
 
 # Load environment variables
 load_dotenv()
@@ -282,6 +284,145 @@ def cancel_response():
     st.session_state.generated_response = None
     st.rerun()  # Update UI immediately
 
+def update_config(auto_respond_enabled, auto_respond_categories, waiting_time, user_name=None):
+    """Update the configuration file with new auto-response settings."""
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    try:
+        # Read current config
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        else:
+            config = {}
+        
+        # Update auto-response settings
+        if 'auto_response' not in config:
+            config['auto_response'] = {}
+        
+        config['auto_response']['enabled'] = auto_respond_enabled
+        config['auto_response']['categories'] = auto_respond_categories
+        config['auto_response']['waiting_time'] = waiting_time
+        
+        # Update user name if provided
+        if user_name:
+            if 'user' not in config:
+                config['user'] = {}
+            config['user']['name'] = user_name
+        
+        # Write updated config
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        
+        # Also update the assistant's config if it exists
+        if st.session_state.assistant:
+            st.session_state.assistant.config = config
+        
+        return True
+    except Exception as e:
+        st.error(f"Error updating config: {e}")
+        return False
+
+def run_auto_responses():
+    """Run the auto-response logic for unprocessed emails."""
+    if not st.session_state.assistant:
+        st.error("No assistant initialized. Please authenticate first.")
+        return False
+    
+    with st.spinner("Processing emails with auto-responder..."):
+        try:
+            # Get current settings
+            config = st.session_state.assistant.config
+            auto_response_config = config.get('auto_response', {})
+            auto_response_enabled = auto_response_config.get('enabled', False)
+            
+            if not auto_response_enabled:
+                st.info("Auto-response is disabled. Enable it in settings to use this feature.")
+                return False
+            
+            # Get auto-response parameters
+            categories_setting = auto_response_config.get('categories', 'Priority Inbox Only')
+            waiting_time = auto_response_config.get('waiting_time', 5)
+            
+            # Sort emails and get the ones to process
+            sorted_emails = st.session_state.assistant.sort_emails()
+            
+            # Determine which categories to process
+            categories_to_respond = AUTO_RESPONSE_CATEGORIES.get(categories_setting, ['priority_inbox'])
+            process_all = categories_to_respond == 'all'
+            
+            # Track processed emails
+            processed_emails = 0
+            
+            # Process each category
+            for category, emails in sorted_emails.items():
+                if process_all or category in categories_to_respond:
+                    st.text(f"Processing {len(emails)} emails in {CATEGORY_DISPLAY_NAMES.get(category, category)}")
+                    
+                    for email in emails:
+                        # Extract important info
+                        sender_email = st.session_state.assistant.extract_email(email['sender'])
+                        sender_name = st.session_state.assistant.extract_name(email['sender'])
+                        
+                        # Generate response
+                        response_body = st.session_state.assistant.generate_email(
+                            recipient_name=sender_name,
+                            original_subject=email['subject'],
+                            original_content=email['body']
+                        )
+                        
+                        # Send response
+                        reply_subject = f"Re: {email['subject']}"
+                        result = st.session_state.assistant.send_email(
+                            to=sender_email,
+                            subject=reply_subject,
+                            body=response_body
+                        )
+                        
+                        if result:
+                            # Mark as read after processing
+                            st.session_state.assistant.mark_as_read(email['id'])
+                            processed_emails += 1
+                            # Brief progress update
+                            st.text(f"✓ Processed: {email['subject'][:40]}...")
+            
+            # Update emails after processing
+            st.session_state.sorted_emails = st.session_state.assistant.sort_emails()
+            st.session_state.emails_loaded = True
+            
+            if processed_emails > 0:
+                st.success(f"Auto-responded to {processed_emails} emails")
+            else:
+                st.info("No emails matched the auto-response criteria")
+            
+            return True
+        except Exception as e:
+            st.error(f"Error running auto-responder: {str(e)}")
+            return False
+
+def get_current_config():
+    """Get the current configuration from the config file."""
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        return {
+            "auto_response": {
+                "enabled": False,
+                "categories": "Priority Inbox Only",
+                "waiting_time": 5
+            }
+        }
+    except Exception as e:
+        st.error(f"Error loading config: {e}")
+        return {
+            "auto_response": {
+                "enabled": False,
+                "categories": "Priority Inbox Only",
+                "waiting_time": 5
+            }
+        }
+
 def display_emails():
     """Display sorted emails in tabs."""
     if not st.session_state.sorted_emails:
@@ -541,6 +682,32 @@ def main():
                 get_emails()
                 st.session_state.needs_refresh = True
                 st.rerun()
+            
+            # Personal settings
+            st.markdown("### Personal Settings")
+            
+            # Get current user name
+            current_config = get_current_config()
+            current_user_name = current_config.get('user', {}).get('name', '')
+            
+            # Input for user name
+            user_name = st.text_input(
+                "Your Name (for email signatures)",
+                value=current_user_name,
+                key="user_display_name"
+            )
+            
+            if st.button("Save Personal Settings"):
+                update_success = update_config(
+                    auto_respond_enabled=current_config.get('auto_response', {}).get('enabled', False),
+                    auto_respond_categories=current_config.get('auto_response', {}).get('categories', 'Priority Inbox Only'),
+                    waiting_time=current_config.get('auto_response', {}).get('waiting_time', 5),
+                    user_name=user_name
+                )
+                if update_success:
+                    st.success("Personal settings saved!")
+                else:
+                    st.error("Failed to save personal settings")
     
     # Main content
     if st.session_state.authenticated:
@@ -570,31 +737,109 @@ def main():
             st.markdown("### Emmy Auto-Responder Configuration")
             st.markdown("Configure how Emmy should automatically handle your emails")
             
-            # Future implementation for personalized response templates
-            auto_respond = st.toggle("Enable Emmy's Auto-Responses for Important Emails", value=False)
+            # Load current config for default values
+            current_config = get_current_config()
+            auto_response_config = current_config.get('auto_response', {})
             
+            # Options for auto-responder with current settings as defaults
+            auto_respond = st.toggle(
+                "Enable Emmy's Auto-Responses", 
+                value=auto_response_config.get('enabled', False),
+                key="auto_respond_toggle"
+            )
+            
+            # Only show these options if auto-respond is enabled
             if auto_respond:
                 st.markdown("#### Auto-Response Settings")
                 
-                # Options for auto-responder
-                st.selectbox(
+                # Categories dropdown
+                categories_options = [
+                    "Priority Inbox Only", 
+                    "All Important", 
+                    "Business Related", 
+                    "Everything"
+                ]
+                
+                current_category = auto_response_config.get('categories', 'Priority Inbox Only')
+                selected_category = st.selectbox(
                     "Email Categories for Emmy to Auto-Respond", 
-                    ["Priority Inbox Only", "Priority & Main Inbox", "All Categories"],
-                    index=0
+                    categories_options,
+                    index=categories_options.index(current_category) if current_category in categories_options else 0,
+                    key="auto_respond_categories"
                 )
                 
+                # Waiting time slider
+                current_waiting_time = auto_response_config.get('waiting_time', 5)
                 waiting_time = st.slider(
                     "Waiting Time Before Emmy Auto-Responds (minutes)", 
                     min_value=0, 
                     max_value=60, 
-                    value=5
+                    value=current_waiting_time,
+                    key="auto_respond_waiting_time"
                 )
                 
-                if st.button("Save Emmy's Auto-Response Settings"):
-                    st.success("Emmy's auto-response settings saved!")
-                    # In a full implementation, save these settings to a configuration
+                # Preview what will be processed
+                st.markdown("#### Preview Selected Categories")
                 
-                st.info("Emmy will use AI to generate contextual responses for your emails.")
+                # Get the actual category keys that will be processed
+                categories_to_process = AUTO_RESPONSE_CATEGORIES.get(selected_category, ['priority_inbox'])
+                
+                if categories_to_process == 'all':
+                    st.info("Emmy will respond to emails in ALL categories")
+                else:
+                    # Show the friendly names of categories
+                    friendly_names = [CATEGORY_DISPLAY_NAMES.get(cat, cat.capitalize()) for cat in categories_to_process]
+                    st.info(f"Emmy will respond to emails in these categories: {', '.join(friendly_names)}")
+                
+                # Debug current settings
+                st.markdown("#### Current Settings")
+                st.json({
+                    "auto_response": {
+                        "enabled": auto_respond,
+                        "categories": selected_category,
+                        "waiting_time": waiting_time
+                    }
+                })
+                
+                # Split buttons into columns for better UI
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("Save Emmy's Auto-Response Settings", key="save_settings"):
+                        # Save configuration to file
+                        success = update_config(auto_respond, selected_category, waiting_time)
+                        if success:
+                            st.success("Emmy's auto-response settings saved!")
+                            # Force reload of the assistant to pick up new settings
+                            if hasattr(st.session_state, 'assistant') and st.session_state.assistant:
+                                st.session_state.assistant.config = get_current_config()
+                                st.session_state.needs_refresh = True
+                                st.rerun()
+                        else:
+                            st.error("Failed to save Emmy's auto-response settings")
+                
+                with col2:
+                    if st.button("Run Auto-Responder Now", key="run_auto_responder"):
+                        # First save the settings to make sure we use the latest
+                        success = update_config(auto_respond, selected_category, waiting_time)
+                        if success:
+                            # Run auto-responder with the updated settings
+                            run_success = run_auto_responses()
+                            if run_success:
+                                # Reload data to reflect changes
+                                st.session_state.needs_refresh = True
+                                st.rerun()
+            else:
+                # If auto-respond is disabled, still provide a way to save this setting
+                if st.button("Save Settings"):
+                    success = update_config(False, "Priority Inbox Only", 5)
+                    if success:
+                        st.success("Auto-responses disabled successfully")
+                        # Force reload of the assistant to pick up new settings
+                        if hasattr(st.session_state, 'assistant') and st.session_state.assistant:
+                            st.session_state.assistant.config = get_current_config()
+                    else:
+                        st.error("Failed to update settings")
     else:
         st.info("Please authenticate Emmy with your Gmail account using the button in the sidebar to get started.")
 
