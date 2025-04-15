@@ -438,7 +438,7 @@ class GmailAssistant:
                 temperature=temperature,
                 n=1
             )
-            
+            ##deploy
             # Extract the generated text from the response
             generated_text = response.choices[0].message.content
             print(f"[DEBUG] Generation successful: {len(generated_text)} characters")
