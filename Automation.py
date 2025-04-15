@@ -452,7 +452,7 @@ class GmailAssistant:
     def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
         """Generate an email using OpenAI with context from original email."""
         # Create a prompt for the model with context from original email
-        prompt = f"Write a professional email response. I am Haider Farooq a Data Scientist. reply to emails accordingly. Make sure proper formatting is done"
+        prompt = f"Write a professional email response. I am Haider Farooq an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done"
         if recipient_name:
             prompt += f" to {recipient_name}"
         if original_subject:

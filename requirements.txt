@@ -7,3 +7,13 @@ streamlit>=1.24.0
 pandas>=1.3.0
 secure-smtplib>=0.1.1
 torch>=2.0.0
+# Additional required dependencies
+numpy>=1.22.0
+email-validator>=2.0.0
+pytz>=2022.1
+python-dateutil>=2.8.2
+requests>=2.28.0
+tqdm>=4.65.0
+argparse>=1.4.0
+watchdog>=2.1.0  # For Streamlit file watching
+pillow>=9.0.0  # Used in streamlit_app.py for image processing
