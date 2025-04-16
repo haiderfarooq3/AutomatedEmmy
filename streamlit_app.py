@@ -123,40 +123,38 @@ def authenticate():
                 if user_email:
                     st.session_state.authenticated = True
                     return user_email
-            
+
             # Initialize the assistant
             if 'assistant' not in st.session_state or st.session_state.assistant is None:
                 st.session_state.assistant = GmailAssistant()
-            
+
             # If service is None, we need to complete OAuth
             if st.session_state.assistant.service is None:
                 # Import required libraries for OAuth
                 import json
                 from google_auth_oauthlib.flow import Flow
-                
+
                 # Get client config from secrets
                 creds_json = json.loads(st.secrets["google"]["credentials_json"])
-                
+
                 # Use the correct redirect URI
-                # In deployed environment, there's only one redirect URI
-                # so using [0] is always correct
                 redirect_uri = creds_json['web']['redirect_uris'][0]
-                
+
                 # Create a Flow instance
                 flow = Flow.from_client_config(
                     client_config=creds_json,
                     scopes=SCOPES,
                     redirect_uri=redirect_uri
                 )
-                
+
                 # Check if we have a code in the URL
                 if 'code' in st.query_params:
                     code = st.query_params['code']
-                    
+
                     # Exchange authorization code for tokens
                     flow.fetch_token(code=code)
                     creds = flow.credentials
-                    
+
                     # Save credentials to session state
                     st.session_state.google_creds = {
                         'token': creds.token,
@@ -166,13 +164,13 @@ def authenticate():
                         'client_secret': creds.client_secret,
                         'scopes': creds.scopes
                     }
-                    
-                    # Clear the URL parameters
-                    st.query_params.clear()
-                    
+
+                    # Clear the URL parameters using the official API
+                    st.experimental_set_query_params()
+
                     # Reinitialize the assistant with the new token
                     st.session_state.assistant = GmailAssistant()
-                    
+
                     if st.session_state.assistant.service:
                         user_email = st.session_state.assistant.get_user_email()
                         if user_email:
@@ -186,12 +184,11 @@ def authenticate():
                         include_granted_scopes='true',
                         prompt='consent'
                     )
-                    
+
                     # Display authentication button that opens in SAME tab
                     st.markdown("### Gmail Authentication Required")
                     st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
-                    
-                    # Create a button that uses window.location.href to navigate in same tab
+
                     st.markdown(f"""
                     <div style="text-align: center; margin-top: 20px;">
                         <a href="{auth_url}" target="_self" style="
@@ -207,7 +204,7 @@ def authenticate():
                         </a>
                     </div>
                     """, unsafe_allow_html=True)
-                    
+
                     return None
             else:
                 # We have a service, so we're authenticated
@@ -219,10 +216,11 @@ def authenticate():
                 else:
                     st.error("Unable to get user email. Authentication may not be complete.")
                     return None
-                
+
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             return None
+
 
 def setup_model():
     """Set up the OpenAI model."""
