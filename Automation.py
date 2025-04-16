@@ -582,35 +582,35 @@ class GmailAssistant:
         except Exception as e:
             print(f"[ERROR] Text generation failed: {type(e).__name__}: {e}")
             return None
-def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
-    """Generate an email using OpenAI with context from original email."""
-    # Create a prompt for the model with context from original email
-    prompt = f"Write a professional email response. I am Qasim Khursheed an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
-    if recipient_name:
-        prompt += f" to {recipient_name}"
-    if original_subject:
-        prompt += f" regarding '{original_subject}'"
-    
-    # Add context from original email if available
-    if original_content:
-        # Truncate the content if it's too long to fit in the prompt
-        max_context_length = 500
-        context = original_content[:max_context_length] + "..." if len(original_content) > max_context_length else original_content
-        prompt += f"\n\nOriginal email content:\n{context}\n\nWrite a professional and helpful response without repeating the subject in the email body:"
-    else:
-        prompt += ":\n\n"
-    
-    generated_text = self.generate_text(prompt, max_tokens=500)
-    if not generated_text:
-        return f"Thank you for your email. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
+    def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
+        """Generate an email using OpenAI with context from original email."""
+        # Create a prompt for the model with context from original email
+        prompt = f"Write a professional email response. I am Qasim Khursheed an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
+        if recipient_name:
+            prompt += f" to {recipient_name}"
+        if original_subject:
+            prompt += f" regarding '{original_subject}'"
         
-    # Clean up the generated text to extract only the email body
-    clean_email = self._extract_email_body(generated_text)
-    
-    # Replace [Your Name] placeholder with Emmy
-    clean_email = clean_email.replace("[Your Name]", "Emmy")
-    
-    return clean_email
+        # Add context from original email if available
+        if original_content:
+            # Truncate the content if it's too long to fit in the prompt
+            max_context_length = 500
+            context = original_content[:max_context_length] + "..." if len(original_content) > max_context_length else original_content
+            prompt += f"\n\nOriginal email content:\n{context}\n\nWrite a professional and helpful response without repeating the subject in the email body:"
+        else:
+            prompt += ":\n\n"
+        
+        generated_text = self.generate_text(prompt, max_tokens=500)
+        if not generated_text:
+            return f"Thank you for your email. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
+            
+        # Clean up the generated text to extract only the email body
+        clean_email = self._extract_email_body(generated_text)
+        
+        # Replace [Your Name] placeholder with Emmy
+        clean_email = clean_email.replace("[Your Name]", "Emmy")
+        
+        return clean_email
     
     def _extract_email_body(self, generated_text):
         """Extract just the email body from the generated text."""
