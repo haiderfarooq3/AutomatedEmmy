@@ -85,19 +85,10 @@ class GmailAssistant:
                 }
             }
     
+    # Update the authenticate method in your Automation.py
     def authenticate(self):
         """Authenticate with Gmail API and return the service object."""
-        from auth_helper import get_gmail_service, is_deployed
-        
-        # If deployed on Streamlit, check if we need special handling
-        if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
-            deployed = is_deployed()
-            if deployed:
-                print("[INFO] Running in deployed environment, using Streamlit secrets for authentication")
-            else:
-                print("[INFO] Running in local Streamlit, using local credentials if available")
-        
-        # Get Gmail service using the updated helper
+        from auth_helper import get_gmail_service
         return get_gmail_service()
     
     def get_unread_emails(self, max_results=10):
