@@ -59,38 +59,157 @@ class GmailAssistant:
         self.user_email = None
         self.openai_model = OPENAI_MODEL
         self.config = self.load_config()
-    
+        
     def load_config(self):
-        """Load configuration from config.json file."""
-        # First try to load from Streamlit secrets if available
+        """Load configuration from Streamlit secrets."""
         try:
             if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+                config = {}
+                
+                # Get auto_response settings
                 if 'config' in st.secrets:
-                    return json.loads(st.secrets['config'])
+                    if 'auto_response' in st.secrets.config:
+                        config['auto_response'] = {
+                            'enabled': st.secrets.config.auto_response.enabled,
+                            'categories': st.secrets.config.auto_response.categories,
+                            'waiting_time': st.secrets.config.auto_response.waiting_time
+                        }
+                    
+                    # Get user settings
+                    if 'user' in st.secrets.config:
+                        config['user'] = {
+                            'name': st.secrets.config.user.name
+                        }
+                
+                # Return the constructed config
+                return config
+            
         except Exception as e:
             print(f"Error loading config from Streamlit secrets: {e}")
         
-        # Fall back to file-based config
-        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-        try:
-            with open(config_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading config from file: {e}")
-            return {
-                "auto_response": {
-                    "enabled": False,
-                    "categories": "Priority Inbox Only",
-                    "waiting_time": 5
-                }
+        # Return a default config if Streamlit secrets are not available
+        return {
+            "auto_response": {
+                "enabled": False,
+                "categories": "Priority Inbox Only",
+                "waiting_time": 5
+            },
+            "user": {
+                "name": "Emmy User"
             }
-    
-    # Update the authenticate method in your Automation.py
+        }
+            
+        
     def authenticate(self):
-        """Authenticate with Gmail API and return the service object."""
-        from auth_helper import get_gmail_service
-        return get_gmail_service()
-    
+        """Authenticate with Gmail API through interactive OAuth flow."""
+        try:
+            # Check if we're running in Streamlit
+            if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+                try:
+                    import json
+                    from google_auth_oauthlib.flow import Flow
+                    from google.oauth2.credentials import Credentials
+                    from googleapiclient.discovery import build
+                    from google.auth.transport.requests import Request
+                    
+                    # Extract client credentials from secrets
+                    creds_json = json.loads(st.secrets["google"]["credentials_json"])
+                    
+                    # Check if we already have tokens in session state
+                    if 'google_creds' not in st.session_state:
+                        # We need to initiate the OAuth flow
+                        st.session_state.auth_status = "Starting OAuth flow"
+                        print("[INFO] Starting OAuth flow")
+                        
+                        # Create a Flow instance with client credentials from secrets
+                        flow = Flow.from_client_config(
+                            client_config=creds_json,
+                            scopes=SCOPES,
+                            redirect_uri=creds_json['web']['redirect_uris'][0]
+                        )
+                        
+                        # Generate the authorization URL
+                        auth_url, _ = flow.authorization_url(
+                            access_type='offline',
+                            include_granted_scopes='true',
+                            prompt='consent'
+                        )
+                        
+                        # Display the authentication URL for the user to click
+                        st.markdown("### Gmail Authentication Required")
+                        st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
+                        st.markdown(f"[Authenticate with Gmail]({auth_url})")
+                        
+                        # Check if we received an authorization code after redirect
+                        try:
+                            query_params = st.experimental_get_query_params()
+                            if 'code' in query_params:
+                                code = query_params['code'][0]
+                                st.session_state.auth_status = "Code received, exchanging for tokens"
+                                
+                                # Exchange authorization code for tokens
+                                flow.fetch_token(code=code)
+                                creds = flow.credentials
+                                
+                                # Store credentials in session state
+                                st.session_state.google_creds = {
+                                    'token': creds.token,
+                                    'refresh_token': creds.refresh_token,
+                                    'token_uri': creds.token_uri,
+                                    'client_id': creds.client_id,
+                                    'client_secret': creds.client_secret,
+                                    'scopes': creds.scopes
+                                }
+                                
+                                # Clear URL parameters to avoid token reuse
+                                st.experimental_set_query_params()
+                            else:
+                                st.session_state.auth_status = "Waiting for authorization code"
+                                return None  # Still waiting for authorization
+                        except Exception as e:
+                            st.session_state.auth_status = f"Error handling redirect: {str(e)}"
+                            print(f"[ERROR] Error handling redirect: {e}")
+                            return None
+                    
+                    # If we have credentials, use them
+                    if 'google_creds' in st.session_state:
+                        creds_data = st.session_state.google_creds
+                        
+                        # Create credentials object
+                        creds = Credentials(
+                            token=creds_data['token'],
+                            refresh_token=creds_data['refresh_token'],
+                            token_uri=creds_data['token_uri'],
+                            client_id=creds_data['client_id'],
+                            client_secret=creds_data['client_secret'],
+                            scopes=creds_data['scopes']
+                        )
+                        
+                        # Refresh token if expired
+                        if creds.expired and creds.refresh_token:
+                            creds.refresh(Request())
+                            # Update the token in session state
+                            st.session_state.google_creds['token'] = creds.token
+                        
+                        # Build and return Gmail service
+                        service = build('gmail', 'v1', credentials=creds)
+                        return service
+                    else:
+                        st.session_state.auth_status = "No credentials available yet"
+                        return None
+                    
+                except Exception as e:
+                    st.session_state.auth_status = f"Authentication error: {str(e)}"
+                    print(f"[ERROR] Authentication error: {e}")
+                    return None
+            
+            # Not running in Streamlit
+            print("[ERROR] This authentication method requires Streamlit")
+            return None
+                
+        except Exception as e:
+            print(f"[ERROR] Authentication error: {e}")
+            return None
     def get_unread_emails(self, max_results=10):
         """Get a list of unread emails."""
         try:

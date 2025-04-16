@@ -102,13 +102,21 @@ def init_session_state():
     if 'auth_status' not in st.session_state:
         st.session_state.auth_status = "Not started"
 
+def is_deployed():
+    """Check if running in a deployed environment."""
+    try:
+        # If we can access Streamlit secrets, we're likely in a deployed environment
+        _ = st.secrets["openai"]["api_key"]
+        return True
+    except Exception:
+        return False
+
 def authenticate():
     """Authenticate the Gmail assistant and load emails automatically."""
     st.session_state.auth_attempted = True
     with st.spinner("Authenticating with Gmail..."):
         try:
             # Check if we're running in a deployed environment
-            from auth_helper import is_deployed
             deployed = is_deployed()
             
             if deployed:
@@ -133,7 +141,6 @@ def authenticate():
                 return None
         except Exception as e:
             st.error(f"Authentication failed: {e}")
-            st.info("Click 'Troubleshoot Authentication' for help with resolving this issue.")
             return None
 
 def setup_model():
@@ -649,13 +656,6 @@ def main():
     """Main function to run the Streamlit app."""
     init_session_state()
     
-    # Check for troubleshooting mode
-    query_params = st.experimental_get_query_params()
-    if 'troubleshoot' in query_params:
-        from troubleshoot import run_troubleshooter
-        run_troubleshooter()
-        return
-    
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
@@ -677,27 +677,29 @@ def main():
         else:
             st.warning("Logo image not found. Please make sure 'Logo.png' exists in the application directory.")
         
-        # Authentication - moved higher
+        # Authentication section
         if not st.session_state.authenticated:
             st.markdown("### Authentication")
             st.markdown(f"Emmy needs access to your Gmail account with the following permissions:")
             for scope in SCOPES:
                 st.markdown(f"- {scope.split('/')[-1]}")
             
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("Authenticate Emmy with Gmail") or (st.session_state.auth_attempted and not st.session_state.authenticated):
-                    user_email = authenticate()
-                    if user_email:
-                        st.success(f"Emmy authenticated as: {user_email}")
-                        # We'll reload the page to update the UI
-                        st.session_state.needs_refresh = True
-                        st.rerun()
-            
-            with col2:
-                if st.button("Troubleshoot Authentication"):
-                    st.experimental_set_query_params(troubleshoot=True)
+            if st.button("Authenticate with Gmail") or (st.session_state.auth_attempted and not st.session_state.authenticated):
+                user_email = authenticate()
+                if user_email:
+                    st.success(f"Emmy authenticated as: {user_email}")
+                    # We'll reload the page to update the UI
+                    st.session_state.needs_refresh = True
                     st.rerun()
+            
+            # Show authentication help information
+            with st.expander("Authentication Help"):
+                st.markdown("""
+                **For Streamlit Cloud Deployment:**
+                1. You must have your Google credentials in the secrets.toml file
+                2. You need both credentials_json and token_json configured
+                3. Contact your administrator if you need help with authentication
+                """)
             
             # Show current authentication status
             if st.session_state.get('auth_status'):
@@ -706,80 +708,14 @@ def main():
             user_email = st.session_state.assistant.get_user_email()
             st.success(f"Emmy authenticated as: {user_email}")
             
-            # Show troubleshooting option even after successful authentication
-            if st.button("Troubleshoot Authentication"):
-                st.experimental_set_query_params(troubleshoot=True)
-                st.rerun()
-            
-            # OpenAI API settings
-            st.markdown("### Emmy's AI Brain")
-            
-            # Try to get from Streamlit secrets first
-            openai_api_key_default = ""
-            openai_model_default = "gpt-3.5-turbo"
-            
-            try:
-                openai_api_key_default = st.secrets["openai"]["api_key"]
-                openai_model_default = st.secrets["openai"]["model"]
-                st.success("✓ OpenAI credentials loaded from Streamlit secrets")
-            except Exception:
-                # Fall back to environment variables
-                openai_api_key_default = os.getenv("OPENAI_API_KEY", "")
-                openai_model_default = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-            
-            # Show OpenAI settings as inputs
-            openai_api_key = st.text_input("OpenAI API Key", type="password", 
-                                         value=openai_api_key_default)
-            if openai_api_key:
-                st.session_state.openai_api_key = openai_api_key
-            
-            openai_model = st.selectbox(
-                "Select OpenAI Model",
-                ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
-                index=0 if openai_model_default == "gpt-3.5-turbo" else 
-                     (1 if openai_model_default == "gpt-4" else 
-                      2 if openai_model_default == "gpt-4-turbo" else 0)
-            )
-            st.session_state.openai_model = openai_model
-            
-            if not st.session_state.hf_model_loaded:
-                if st.button("Connect to OpenAI API"):
-                    setup_model()
-            else:
-                st.success("Emmy's AI brain is connected and ready!")
-            
-            # Email refresh
-            st.markdown("### Email Management")
-            if st.button("Refresh Emails"):
-                get_emails()
-                st.session_state.needs_refresh = True
-                st.rerun()
-            
-            # Personal settings
-            st.markdown("### Personal Settings")
-            
-            # Get current user name
-            current_config = get_current_config()
-            current_user_name = current_config.get('user', {}).get('name', '')
-            
-            # Input for user name
-            user_name = st.text_input(
-                "Your Name (for email signatures)",
-                value=current_user_name,
-                key="user_display_name"
-            )
-            
-            if st.button("Save Personal Settings"):
-                update_success = update_config(
-                    auto_respond_enabled=current_config.get('auto_response', {}).get('enabled', False),
-                    auto_respond_categories=current_config.get('auto_response', {}).get('categories', 'Priority Inbox Only'),
-                    waiting_time=current_config.get('auto_response', {}).get('waiting_time', 5),
-                    user_name=user_name
-                )
-                if update_success:
-                    st.success("Personal settings saved!")
-                else:
-                    st.error("Failed to save personal settings")
+            # Show authentication help even after successful authentication
+            with st.expander("Authentication Help"):
+                st.markdown("""
+                **For Streamlit Cloud Deployment:**
+                1. You must have your Google credentials in the secrets.toml file
+                2. You need both credentials_json and token_json configured
+                3. Contact your administrator if you need help with authentication
+                """)
     
     # Main content
     if st.session_state.authenticated:
