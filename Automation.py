@@ -1,5 +1,6 @@
 __import__('streamlit').config.set_option('server.fileWatcherType', 'none')
 import os
+import sys  # Add missing sys import
 import base64
 import pickle
 from email.mime.text import MIMEText
@@ -15,15 +16,30 @@ import openai
 from dotenv import load_dotenv
 import json
 import time
+import streamlit as st
 from constants import CATEGORY_DISPLAY_NAMES, AUTO_RESPONSE_CATEGORIES, AUTO_RESPONSE_WAITING_TIMES
 
-# Load environment variables
+# Check if running in Streamlit
+is_streamlit = 'streamlit' in globals()
+
+# Load environment variables from .env file for local development
 load_dotenv()
 
-# Get OpenAI API key from environment
-openai.api_key = os.getenv("OPENAI_API_KEY")
-# Default model from environment or fallback to GPT-3.5-Turbo
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+# Get OpenAI API key from environment or Streamlit secrets
+if is_streamlit or 'streamlit._is_running' in sys.modules:
+    try:
+        # Running in Streamlit - use secrets
+        openai.api_key = st.secrets["openai"]["api_key"]
+        OPENAI_MODEL = st.secrets["openai"]["model"]
+    except Exception as e:
+        print(f"Error loading from Streamlit secrets: {e}")
+        # Fallback to environment variables
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+else:
+    # Running standalone - use environment variables
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 
 # Define the scopes required for Gmail API
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify',
@@ -60,36 +76,11 @@ class GmailAssistant:
                 }
             }
     
+    # Update the authenticate method in your Automation.py
     def authenticate(self):
         """Authenticate with Gmail API and return the service object."""
-        creds = None
-        token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
-        
-        # Load existing credentials from token.pickle if available
-        if os.path.exists(token_path):
-            with open(token_path, 'rb') as token:
-                creds = pickle.load(token)
-        
-        # If credentials are not valid, refresh or get new ones
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                creds_path = os.path.join(os.path.dirname(__file__), 'credentials.json')
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    creds_path, 
-                    SCOPES,
-                    redirect_uri='http://localhost:8080'  # Explicitly set redirect URI
-                )
-                print("Please make sure this redirect URI is registered in your Google Cloud Console:")
-                print("http://localhost:8080")
-                creds = flow.run_local_server(port=8080)  # Use a consistent port
-            
-            # Save credentials for next run
-            with open(token_path, 'wb') as token:
-                pickle.dump(creds, token)
-        
-        return build('gmail', 'v1', credentials=creds)
+        from auth_helper import get_gmail_service
+        return get_gmail_service()
     
     def get_unread_emails(self, max_results=10):
         """Get a list of unread emails."""
@@ -363,7 +354,19 @@ class GmailAssistant:
     def setup_openai(self, api_key=None, model=None, no_prompt=False):
         """Set up OpenAI for content generation."""
         try:
-            # Prioritize environment variables if no explicit values are provided
+            # Check if running in Streamlit first
+            if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+                try:
+                    # Get from Streamlit secrets if available
+                    api_key = st.secrets["openai"]["api_key"]
+                    model = st.secrets["openai"]["model"]
+                    print(f"Using OpenAI API key from Streamlit secrets: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
+                    print(f"Using OpenAI model from Streamlit secrets: {model}")
+                except Exception as e:
+                    print(f"[WARNING] Could not load from Streamlit secrets: {e}")
+                    # Fall back to environment variables or provided values
+            
+            # If not from Streamlit, prioritize environment variables if no explicit values are provided
             if not api_key:
                 api_key = os.getenv("OPENAI_API_KEY")
                 if not api_key:

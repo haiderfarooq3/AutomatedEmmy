@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from Automation import GmailAssistant, SCOPES
 from constants import CATEGORY_DISPLAY_NAMES, AUTO_RESPONSE_CATEGORIES, AUTO_RESPONSE_WAITING_TIMES
 
-# Load environment variables
+# Load environment variables for local development
 load_dotenv()
 
 # Set page configuration and styling
@@ -120,14 +120,25 @@ def setup_model():
     if not st.session_state.hf_model_loaded:
         with st.spinner("Setting up OpenAI integration... This may take a moment..."):
             try:
-                # Get OpenAI API key from session state or environment
-                openai_key = st.session_state.get('openai_api_key', None)
-                # Get selected model from session state
-                selected_model = st.session_state.get('openai_model', None)
+                # Get OpenAI API key from Streamlit secrets or session state
+                openai_key = None
+                selected_model = None
                 
+                # Try to get from Streamlit secrets first
+                try:
+                    openai_key = st.secrets["openai"]["api_key"]
+                    selected_model = st.secrets["openai"]["model"]
+                    st.write(f"Using OpenAI model from secrets: {selected_model}")
+                except Exception as e:
+                    st.warning(f"Could not load OpenAI credentials from Streamlit secrets: {e}")
+                    # Fall back to session state or UI input
+                    openai_key = st.session_state.get('openai_api_key', None)
+                    selected_model = st.session_state.get('openai_model', None)
+                
+                # Set up OpenAI
                 success = st.session_state.assistant.setup_openai(
                     api_key=openai_key,
-                    model=selected_model,  # Pass the selected model here
+                    model=selected_model,
                     no_prompt=True
                 )
                 
@@ -658,15 +669,32 @@ def main():
             
             # OpenAI API settings
             st.markdown("### Emmy's AI Brain")
+            
+            # Try to get from Streamlit secrets first
+            openai_api_key_default = ""
+            openai_model_default = "gpt-3.5-turbo"
+            
+            try:
+                openai_api_key_default = st.secrets["openai"]["api_key"]
+                openai_model_default = st.secrets["openai"]["model"]
+                st.success("✓ OpenAI credentials loaded from Streamlit secrets")
+            except Exception:
+                # Fall back to environment variables
+                openai_api_key_default = os.getenv("OPENAI_API_KEY", "")
+                openai_model_default = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+            
+            # Show OpenAI settings as inputs
             openai_api_key = st.text_input("OpenAI API Key", type="password", 
-                                          value=os.getenv("OPENAI_API_KEY", ""))
+                                         value=openai_api_key_default)
             if openai_api_key:
                 st.session_state.openai_api_key = openai_api_key
             
             openai_model = st.selectbox(
                 "Select OpenAI Model",
                 ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"],
-                index=0
+                index=0 if openai_model_default == "gpt-3.5-turbo" else 
+                     (1 if openai_model_default == "gpt-4" else 
+                      2 if openai_model_default == "gpt-4-turbo" else 0)
             )
             st.session_state.openai_model = openai_model
             
