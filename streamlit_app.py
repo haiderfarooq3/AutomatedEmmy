@@ -111,13 +111,6 @@ def is_deployed():
     except Exception:
         return False
 
-# Add this function near the top of your file, before authenticate():
-def initialize_oauth_state():
-    """Initialize a unique state parameter for OAuth if not already present."""
-    if 'oauth_state' not in st.session_state:
-        import uuid
-        st.session_state.oauth_state = str(uuid.uuid4())
-    return st.session_state.oauth_state
 
 def authenticate():
     """Authenticate the Gmail assistant and load emails automatically."""
@@ -144,11 +137,9 @@ def authenticate():
                 # Get client config from secrets
                 creds_json = json.loads(st.secrets["google"]["credentials_json"])
 
-                # Set the explicit callback URL for the deployed app
-                # This should match what you've set in your Google Cloud Console
-                domain = "automatedemmy.streamlit.app"  # Change this if your domain is different
-                redirect_uri = f"https://automatedemmy.streamlit.app/static/oauth_callback.html"
-                
+                # Use the correct redirect URI
+                redirect_uri = creds_json['web']['redirect_uris'][0]
+
                 # Create a Flow instance
                 flow = Flow.from_client_config(
                     client_config=creds_json,
@@ -156,121 +147,68 @@ def authenticate():
                     redirect_uri=redirect_uri
                 )
 
-                # Create a unique state parameter for security
-                if 'oauth_state' not in st.session_state:
-                    import uuid
-                    st.session_state.oauth_state = str(uuid.uuid4())
-                
-                # Generate the authorization URL with state parameter
-                auth_url, _ = flow.authorization_url(
-                    access_type='offline',
-                    include_granted_scopes='true',
-                    prompt='consent',
-                    state=st.session_state.oauth_state
-                )
+                # Check if we have a code in the URL
+                if 'code' in st.query_params:
+                    code = st.query_params['code']
 
-                # Display authentication button
-                st.markdown("### Gmail Authentication Required")
-                st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
+                    # Exchange authorization code for tokens
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
 
-                # JavaScript to open a popup and listen for auth completion
-                js_code = f"""
-                <script>
-                // Function to check authentication status
-                function checkAuthCompleted() {{
-                    if (localStorage.getItem('emmy_auth_completed') === 'true') {{
-                        console.log('Authentication completed flag detected, reloading');
-                        localStorage.removeItem('emmy_auth_completed');
-                        localStorage.removeItem('emmy_auth_in_progress');
-                        window.location.reload();
-                        return true;
-                    }}
-                    return false;
-                }}
-
-                // Listen for auth_complete message from the popup
-                window.addEventListener('message', function(event) {{
-                    if (event.data === 'auth_complete') {{
-                        console.log('Authentication completed via postMessage');
-                        localStorage.setItem('emmy_auth_completed', 'true');
-                        checkAuthCompleted();
-                    }}
-                }}, false);
-
-                // Check for auth completion immediately
-                checkAuthCompleted();
-
-                // Also set an interval to periodically check
-                var authCheckInterval = setInterval(function() {{
-                    if (checkAuthCompleted()) {{
-                        clearInterval(authCheckInterval);
-                    }}
-                }}, 1000);  // Check every second
-
-                function openAuthPopup() {{
-                    // Set window features for a popup that's large enough
-                    var windowFeatures = "width=600,height=700,scrollbars=yes,resizable=yes";
-                    
-                    // Set a flag to indicate auth is in progress
-                    localStorage.setItem('emmy_auth_in_progress', 'true');
-                    
-                    // Open the auth window as a popup
-                    var authWindow = window.open('{auth_url}', 'emmyOAuth', windowFeatures);
-                    
-                    // If popup blocked, show direct link
-                    if (!authWindow || authWindow.closed || typeof authWindow.closed=='undefined') {{
-                        alert("Popup blocked by browser. Please enable popups or use the direct link below.");
-                        document.getElementById('direct_auth_link').style.display = 'block';
-                    }}
-                    
-                    return false;
-                }}
-                </script>
-
-                <button 
-                    onclick="openAuthPopup()" 
-                    style="background-color: #1E88E5; color: white; border: none; 
-                        border-radius: 4px; padding: 10px 20px; cursor: pointer;
-                        font-weight: bold; margin-top: 10px;">
-                    Authenticate with Gmail
-                </button>
-
-                <div id="direct_auth_link" style="display:none; margin-top: 15px">
-                    <a href="{auth_url}" target="_self" style="color: #1E88E5;">
-                        Direct authentication link - click here if popup doesn't work
-                    </a>
-                </div>
-                """
-                # Render the JavaScript and custom button
-                st.components.v1.html(js_code, height=100)
-                
-                # Check for authentication completion from previous popup
-                js_completion_check = """
-                <script>
-                // Check if authentication was completed via localStorage
-                document.addEventListener('DOMContentLoaded', function() {
-                    if (localStorage.getItem('emmy_auth_completed') === 'true') {
-                        console.log("Auth completed flag detected, triggering reauth");
-                        
-                        // Clear the flag
-                        localStorage.removeItem('emmy_auth_completed');
-                        localStorage.removeItem('emmy_auth_in_progress');
-                        
-                        // Click the authenticate button to start the process with the saved token
-                        document.getElementById('reauth_trigger').click();
+                    # Save credentials to session state
+                    st.session_state.google_creds = {
+                        'token': creds.token,
+                        'refresh_token': creds.refresh_token,
+                        'token_uri': creds.token_uri,
+                        'client_id': creds.client_id,
+                        'client_secret': creds.client_secret,
+                        'scopes': creds.scopes
                     }
-                });
-                </script>
-                """
-                st.components.v1.html(js_completion_check, height=0)
-                
-                # Hidden button to trigger reauthentication after popup completes
-                if st.button("Refresh Authentication", key="reauth_trigger"):
-                    # This endpoint is hit when the hidden button is clicked
-                    # which happens via JavaScript when auth_completed flag is true
-                    return authenticate()
-                
-                return None
+
+                    # Clear the URL parameters using the official API
+                    st.experimental_set_query_params()
+
+                    # Reinitialize the assistant with the new token
+                    st.session_state.assistant = GmailAssistant()
+
+                    if st.session_state.assistant.service:
+                        user_email = st.session_state.assistant.get_user_email()
+                        if user_email:
+                            st.session_state.authenticated = True
+                            get_emails()  # Auto-load emails
+                            return user_email
+                else:
+                    # Generate the authorization URL
+                    auth_url, _ = flow.authorization_url(
+                        access_type='offline',
+                        include_granted_scopes='true',
+                        prompt='consent'
+                    )
+                    # Replace the existing authentication link in your authenticate() function with this:
+                    # Find lines 201-214 in your streamlit_app.py file
+
+                    # Display authentication button that opens in SAME tab using JavaScript
+                    st.markdown("### Gmail Authentication Required")
+                    st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
+
+                    # Use HTML/JS to force opening in the same tab
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 20px;">
+                        <a href="{auth_url}" target="_blank" style="
+                            text-decoration: none;
+                            background-color: #FF4B4B;
+                            color: white;
+                            padding: 10px 20px;
+                            border-radius: 5px;
+                            font-weight: bold;
+                            display: inline-block;
+                        " onclick="window.top.location.href='{auth_url}'; return false;">
+                            Authenticate with Gmail
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    return None
             else:
                 # We have a service, so we're authenticated
                 user_email = st.session_state.assistant.get_user_email()
@@ -284,7 +222,8 @@ def authenticate():
 
         except Exception as e:
             st.error(f"Authentication failed: {e}")
-            return None        
+            return None
+
 
 def setup_model():
     """Set up the OpenAI model."""
@@ -797,54 +736,13 @@ def display_email_details():
 
 def main():
     """Main function to run the Streamlit app."""
-    init_session_state()    
-
-
-    # Check for auth completion from local storage
-    js_check = """
-    <script>
-    // Function to check authentication status
-    function checkAuthStatus() {
-        // Check if authentication was completed
-        if (localStorage.getItem('emmy_auth_completed') === 'true') {
-            console.log("Auth completed flag detected, will reload auth state");
-            
-            // Clear the flag immediately to prevent loops
-            localStorage.removeItem('emmy_auth_completed');
-            localStorage.removeItem('emmy_auth_in_progress');
-            
-            // Force a page reload to update the UI state
-            window.location.reload();
-            return true;
-        }
-        return false;
-    }
-
-    // Check immediately when the script runs
-    checkAuthStatus();
-
-    // Also set an interval to periodically check (helps with timing issues)
-    setInterval(function() {
-        checkAuthStatus();
-    }, 1000);  // Check every second
-
-    // Check if authentication is in progress for waiting message
-    var auth_in_progress = localStorage.getItem('emmy_auth_in_progress') === 'true';
-    var waitingElement = document.getElementById('waiting_auth');
-    if (waitingElement) {
-        waitingElement.style.display = auth_in_progress ? 'block' : 'none';
-    }
-    </script>
-
-    <div id="waiting_auth" style="display: none; padding: 10px; 
-        background-color: #f8f9fa; border-radius: 5px; margin-bottom: 20px;">
-        <p style="margin: 0; color: #0066cc; font-weight: bold;">
-            Authentication in progress... please complete it in the popup window.
-            This page will update automatically when authentication is complete.
-        </p>
-    </div>
-    """
-    st.components.v1.html(js_check, height=50)
+    init_session_state()
+    
+    if 'code' in st.query_params and not st.session_state.authenticated:
+        with st.spinner("Completing authentication..."):
+            authenticate()
+            if st.session_state.authenticated:
+                st.rerun()
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
@@ -889,27 +787,6 @@ def main():
                 2. You need to authorize access to your Gmail account
                 3. Contact your administrator if you need help with authentication
                 """)
-
-                # Add this debugging section to your sidebar:
-            with st.expander("Debug Authentication"):
-                st.write("Current auth status:", st.session_state.get('authenticated', False))
-                st.write("Auth attempted:", st.session_state.get('auth_attempted', False))
-                st.write("Assistant initialized:", st.session_state.get('assistant') is not None)
-                if st.session_state.get('assistant'):
-                    st.write("Service available:", st.session_state.assistant.service is not None)
-                
-                # Force clear query params button
-                if st.button("Clear Query Parameters"):
-                    st.query_params.clear()
-                    st.rerun()
-                
-                # Reset authentication button
-                if st.button("Reset Authentication"):
-                    if 'assistant' in st.session_state:
-                        del st.session_state.assistant
-                    st.session_state.authenticated = False
-                    st.session_state.auth_attempted = False
-                    st.rerun()
         else:
             user_email = st.session_state.assistant.get_user_email()
             st.success(f"Emmy authenticated as: {user_email}")
