@@ -99,12 +99,15 @@ class GmailAssistant:
             }
         }
             
-        
     def authenticate(self):
         """Authenticate with Gmail API through interactive OAuth flow."""
         try:
-            # Check if we're running in Streamlit
-            if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+            # More reliable Streamlit detection
+            is_streamlit = ('streamlit' in sys.modules or 
+                            'streamlit._is_running' in sys.modules or
+                            'st' in globals())
+            
+            if is_streamlit:
                 try:
                     import json
                     from google_auth_oauthlib.flow import Flow
@@ -202,11 +205,11 @@ class GmailAssistant:
                     st.session_state.auth_status = f"Authentication error: {str(e)}"
                     print(f"[ERROR] Authentication error: {e}")
                     return None
-            
-            # Not running in Streamlit
-            print("[ERROR] This authentication method requires Streamlit")
-            return None
-                
+            else:
+                # Not running in Streamlit - this is a more informative error message
+                print("[ERROR] This application requires Streamlit to run. Please launch with 'streamlit run streamlit_app.py'")
+                return None
+                    
         except Exception as e:
             print(f"[ERROR] Authentication error: {e}")
             return None
