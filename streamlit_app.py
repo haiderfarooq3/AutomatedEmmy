@@ -176,18 +176,36 @@ def authenticate():
                 # JavaScript to open a popup and listen for auth completion
                 js_code = f"""
                 <script>
+                // Function to check authentication status
+                function checkAuthCompleted() {{
+                    if (localStorage.getItem('emmy_auth_completed') === 'true') {{
+                        console.log('Authentication completed flag detected, reloading');
+                        localStorage.removeItem('emmy_auth_completed');
+                        localStorage.removeItem('emmy_auth_in_progress');
+                        window.location.reload();
+                        return true;
+                    }}
+                    return false;
+                }}
+
                 // Listen for auth_complete message from the popup
                 window.addEventListener('message', function(event) {{
                     if (event.data === 'auth_complete') {{
-                        console.log('Authentication completed successfully');
-                        // Clear any auth flags
-                        localStorage.removeItem('emmy_auth_in_progress');
-                        // Set completion flag
+                        console.log('Authentication completed via postMessage');
                         localStorage.setItem('emmy_auth_completed', 'true');
-                        // Reload the main app
-                        window.location.reload();
+                        checkAuthCompleted();
                     }}
                 }}, false);
+
+                // Check for auth completion immediately
+                checkAuthCompleted();
+
+                // Also set an interval to periodically check
+                var authCheckInterval = setInterval(function() {{
+                    if (checkAuthCompleted()) {{
+                        clearInterval(authCheckInterval);
+                    }}
+                }}, 1000);  // Check every second
 
                 function openAuthPopup() {{
                     // Set window features for a popup that's large enough
@@ -218,7 +236,7 @@ def authenticate():
                 </button>
 
                 <div id="direct_auth_link" style="display:none; margin-top: 15px">
-                    <a href="{auth_url}" target="_blank" style="color: #1E88E5;">
+                    <a href="{auth_url}" target="_self" style="color: #1E88E5;">
                         Direct authentication link - click here if popup doesn't work
                     </a>
                 </div>
@@ -785,27 +803,41 @@ def main():
     # Check for auth completion from local storage
     js_check = """
     <script>
-    // Check if authentication was completed
-    if (localStorage.getItem('emmy_auth_completed') === 'true') {
-        console.log("Auth completed flag detected, will reload auth state");
-        // Clear the flag only after reload
-        setTimeout(function() {
+    // Function to check authentication status
+    function checkAuthStatus() {
+        // Check if authentication was completed
+        if (localStorage.getItem('emmy_auth_completed') === 'true') {
+            console.log("Auth completed flag detected, will reload auth state");
+            
+            // Clear the flag immediately to prevent loops
             localStorage.removeItem('emmy_auth_completed');
             localStorage.removeItem('emmy_auth_in_progress');
-        }, 1000);
+            
+            // Force a page reload to update the UI state
+            window.location.reload();
+            return true;
+        }
+        return false;
     }
-    
-    // Check if authentication is in progress
-    if (localStorage.getItem('emmy_auth_in_progress') === 'true') {
-        // Show a message that we're waiting for auth
-        document.getElementById('waiting_auth').style.display = 'block';
-    } else {
-        document.getElementById('waiting_auth').style.display = 'none';
+
+    // Check immediately when the script runs
+    checkAuthStatus();
+
+    // Also set an interval to periodically check (helps with timing issues)
+    setInterval(function() {
+        checkAuthStatus();
+    }, 1000);  // Check every second
+
+    // Check if authentication is in progress for waiting message
+    var auth_in_progress = localStorage.getItem('emmy_auth_in_progress') === 'true';
+    var waitingElement = document.getElementById('waiting_auth');
+    if (waitingElement) {
+        waitingElement.style.display = auth_in_progress ? 'block' : 'none';
     }
     </script>
-    
+
     <div id="waiting_auth" style="display: none; padding: 10px; 
-         background-color: #f8f9fa; border-radius: 5px; margin-bottom: 20px;">
+        background-color: #f8f9fa; border-radius: 5px; margin-bottom: 20px;">
         <p style="margin: 0; color: #0066cc; font-weight: bold;">
             Authentication in progress... please complete it in the popup window.
             This page will update automatically when authentication is complete.
@@ -813,7 +845,6 @@ def main():
     </div>
     """
     st.components.v1.html(js_check, height=50)
-    
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
