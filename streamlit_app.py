@@ -184,11 +184,14 @@ def authenticate():
                         include_granted_scopes='true',
                         prompt='consent'
                     )
+                    # Replace the existing authentication link in your authenticate() function with this:
+                    # Find lines 201-214 in your streamlit_app.py file
 
-                    # Display authentication button that opens in SAME tab
+                    # Display authentication button that opens in SAME tab using JavaScript
                     st.markdown("### Gmail Authentication Required")
                     st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
 
+                    # Use HTML/JS to force opening in the same tab
                     st.markdown(f"""
                     <div style="text-align: center; margin-top: 20px;">
                         <a href="{auth_url}" target="_self" style="
@@ -199,7 +202,7 @@ def authenticate():
                             border-radius: 5px;
                             font-weight: bold;
                             display: inline-block;
-                        ">
+                        " onclick="window.top.location.href='{auth_url}'; return false;">
                             Authenticate with Gmail
                         </a>
                     </div>
