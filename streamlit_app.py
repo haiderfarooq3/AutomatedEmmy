@@ -737,11 +737,6 @@ def main():
     """Main function to run the Streamlit app."""
     init_session_state()
     
-    if 'code' in st.query_params and not st.session_state.authenticated:
-        with st.spinner("Completing authentication..."):
-            authenticate()
-            if st.session_state.authenticated:
-                st.rerun()
 
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
