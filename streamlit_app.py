@@ -137,11 +137,16 @@ def authenticate():
                 # Get client config from secrets
                 creds_json = json.loads(st.secrets["google"]["credentials_json"])
                 
+                # Use the correct redirect URI
+                # In deployed environment, there's only one redirect URI
+                # so using [0] is always correct
+                redirect_uri = creds_json['web']['redirect_uris'][0]
+                
                 # Create a Flow instance
                 flow = Flow.from_client_config(
                     client_config=creds_json,
                     scopes=SCOPES,
-                    redirect_uri=creds_json['web']['redirect_uris'][0]
+                    redirect_uri=redirect_uri
                 )
                 
                 # Check if we have a code in the URL
