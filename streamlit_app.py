@@ -187,27 +187,37 @@ def authenticate():
                     # Replace the existing authentication link in your authenticate() function with this:
                     # Find lines 201-214 in your streamlit_app.py file
 
-                    # Display authentication button that opens in SAME tab using JavaScript
+                    # Display authentication button
                     st.markdown("### Gmail Authentication Required")
                     st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
 
-                    # Use HTML/JS to force opening in the same tab
-                    st.markdown(f"""
-                    <div style="text-align: center; margin-top: 20px;">
-                        <a href="{auth_url}" target="_blank" style="
-                            text-decoration: none;
-                            background-color: #FF4B4B;
-                            color: white;
-                            padding: 10px 20px;
-                            border-radius: 5px;
-                            font-weight: bold;
-                            display: inline-block;
-                        " onclick="window.top.location.href='{auth_url}'; return false;">
-                            Authenticate with Gmail
-                        </a>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    # Create a unique state parameter to identify this authentication session
+                    if 'oauth_state' not in st.session_state:
+                        import uuid
+                        st.session_state.oauth_state = str(uuid.uuid4())
 
+                    # Add state parameter to auth URL for session tracking
+                    auth_url_with_state = f"{auth_url}&state={st.session_state.oauth_state}"
+
+                    # Use a regular button that opens the auth URL in a new tab
+                    if st.button("Authenticate with Gmail", key="auth_button"):
+                        # Use JavaScript to open auth in new tab and keep checking original tab for completion
+                        js_code = f"""
+                        <script>
+                        // Open OAuth in new tab
+                        var authWindow = window.open('{auth_url_with_state}', '_blank');
+                        
+                        // Set a flag in localStorage to indicate authentication is in progress
+                        localStorage.setItem('emmy_auth_in_progress', 'true');
+                        localStorage.setItem('emmy_auth_state', '{st.session_state.oauth_state}');
+                        
+                        // Reload the current page after 1 second to start checking for auth completion
+                        setTimeout(function() {{
+                            window.location.reload();
+                        }}, 1000);
+                        </script>
+                        """
+                        st.components.v1.html(js_code, height=0)
                     return None
             else:
                 # We have a service, so we're authenticated
@@ -736,13 +746,53 @@ def display_email_details():
 
 def main():
     """Main function to run the Streamlit app."""
-    init_session_state()
-    
-    if 'code' in st.query_params and not st.session_state.authenticated:
+    init_session_state()    
+    # Add check for OAuth completion
+    if 'code' in st.query_params and 'state' in st.query_params:
+        # We have a code from OAuth redirect
+        state_param = st.query_params['state']
+        
+        # Process the authorization code
         with st.spinner("Completing authentication..."):
             authenticate()
             if st.session_state.authenticated:
+                # Clear URL parameters
+                st.query_params.clear()
+                
+                # Use JavaScript to signal the opener that auth is complete
+                js_code = """
+                <script>
+                // Clear the auth in progress flag
+                localStorage.removeItem('emmy_auth_in_progress');
+                localStorage.removeItem('emmy_auth_state');
+                </script>
+                """
+                st.components.v1.html(js_code, height=0)
+                
                 st.rerun()
+    
+    # Check if authentication is in progress
+    js_check = """
+    <script>
+    // Check if authentication is in progress from localStorage
+    if (localStorage.getItem('emmy_auth_in_progress') === 'true') {
+        // Show a message that we're waiting for auth
+        document.getElementById('waiting_auth').style.display = 'block';
+    } else {
+        document.getElementById('waiting_auth').style.display = 'none';
+    }
+    </script>
+    
+    <div id="waiting_auth" style="display: none; padding: 10px; 
+         background-color: #f8f9fa; border-radius: 5px; margin-bottom: 20px;">
+        <p style="margin: 0; color: #0066cc; font-weight: bold;">
+            Authentication in progress... please complete it in the popup window.
+            This page will update automatically when authentication is complete.
+        </p>
+    </div>
+    """
+    st.components.v1.html(js_check, height=50)
+    
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
