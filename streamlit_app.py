@@ -758,6 +758,10 @@ def main():
     
     # Main content
     if st.session_state.authenticated:
+
+        if not st.session_state.hf_model_loaded:
+            setup_model()
+            
         # Content tabs
         tab1, tab2 = st.tabs(["Emmy Dashboard", "Auto-Response Settings"])
         

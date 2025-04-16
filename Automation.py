@@ -492,136 +492,120 @@ class GmailAssistant:
             print(f'Error sending email: {e}')
             return None
     
+        # Fix for setup_openai method
     def setup_openai(self, api_key=None, model=None, no_prompt=False):
         """Set up OpenAI for content generation."""
         try:
-            # Check if running in Streamlit first
-            if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+            # First try to use explicitly provided parameters
+            if api_key:
+                self.openai_client = openai.OpenAI(api_key=api_key.strip())
+            elif 'streamlit' in sys.modules:
                 try:
                     # Get from Streamlit secrets if available
                     api_key = st.secrets["openai"]["api_key"]
-                    model = st.secrets["openai"]["model"]
+                    self.openai_client = openai.OpenAI(api_key=api_key)
                     print(f"Using OpenAI API key from Streamlit secrets: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
-                    print(f"Using OpenAI model from Streamlit secrets: {model}")
+                    
+                    # Only override model if not explicitly provided
+                    if not model and "model" in st.secrets["openai"]:
+                        model = st.secrets["openai"]["model"]
+                        print(f"Using OpenAI model from Streamlit secrets: {model}")
                 except Exception as e:
-                    print(f"[WARNING] Could not load from Streamlit secrets: {e}")
-                    # Fall back to environment variables or provided values
-            
-            # If not from Streamlit, prioritize environment variables if no explicit values are provided
-            if not api_key:
+                    print(f"[WARNING] Could not load API key from Streamlit secrets: {e}")
+                    # Fall back to environment variables
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if api_key:
+                        self.openai_client = openai.OpenAI(api_key=api_key)
+                        print(f"Using OpenAI API key from environment: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
+            else:
+                # Not in Streamlit, use environment variables
                 api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    print("[ERROR] OpenAI API key not found in environment variables")
-                    return False
-                print(f"Using OpenAI API key from environment: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
+                if api_key:
+                    self.openai_client = openai.OpenAI(api_key=api_key)
+                    print(f"Using OpenAI API key from environment: {'*' * (len(api_key) - 4) + api_key[-4:] if api_key else 'None'}")
+            
+            # Set the model after determining API key
+            if model:
+                self.openai_model = model
+            else:
+                self.openai_model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+            
+            print(f"[DEBUG] Using OpenAI model: {self.openai_model}")
+            print(f"[DEBUG] API key is set: {hasattr(self, 'openai_client')}")
 
-            if not model:
-                model = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
-                print(f"Using OpenAI model from environment: {model}")
+            # Verify that we have a client
+            if not hasattr(self, 'openai_client'):
+                print("[ERROR] OpenAI client could not be initialized")
+                return False
             
-            # Set the API key and model
-            openai.api_key = api_key.strip()  # Remove any whitespace that might cause issues
-            self.openai_model = model
-            
-            # Debug information
-            print(f"[DEBUG] Setting up OpenAI with model: {self.openai_model}")
-            
-            # Verify API key is working with a simple test
-            if not no_prompt:
-                print(f"Testing OpenAI API connection...")
-            
-            # Try a simple completion to test the API key
-            print(f"[DEBUG] Sending test request to OpenAI API...")
-            print(f"[DEBUG] API Key valid format check: {bool(api_key) and len(api_key) > 20}")
-            
-            # Add more detailed error handling for the API request
+            # Test the API key with a simple request
             try:
-                response = openai.ChatCompletion.create(
+                response = self.openai_client.chat.completions.create(
                     model=self.openai_model,
                     messages=[{"role": "user", "content": "Hello, this is a test."}],
                     max_tokens=10
                 )
-                print(f"[DEBUG] Received response: {response.choices[0].message.content}")
-                
-                if not no_prompt:
-                    print("✓ OpenAI API connection successful!")
-                
+                print(f"[DEBUG] API test successful: {response.choices[0].message.content}")
                 return True
-            except openai.error.AuthenticationError as auth_err:
-                print(f"[ERROR] Authentication failed: {auth_err}")
-                print("[HINT] Your API key may be invalid or expired. Check your .env file.")
+            except Exception as e:
+                print(f"[ERROR] API test failed: {e}")
                 return False
-            except openai.error.RateLimitError:
-                print("[ERROR] Rate limit exceeded. Please try again later.")
-                # We'll still return True since the API key is valid
-                return True
-            except openai.error.InvalidRequestError as req_err:
-                print(f"[ERROR] Invalid request: {req_err}")
-                # If it's a model availability issue, suggest alternatives
-                if "model" in str(req_err).lower():
-                    print("[HINT] The specified model may not be available. Try using 'gpt-3.5-turbo' instead.")
-                return False
-            
+                
         except Exception as e:
             print(f"[ERROR] Failed to set up OpenAI: {e}")
             print("[DEBUG] Exception type:", type(e).__name__)
-            print("[HINT] Check that your .env file is properly formatted and in the correct location.")
-            print("[HINT] The .env file should contain: OPENAI_API_KEY=your_api_key_here")
             return False
-    
     def generate_text(self, prompt, max_tokens=500, temperature=0.7):
         """Generate text using OpenAI."""
         try:
+            # Verify the client is available before making the request
+            if not hasattr(self, 'openai_client'):
+                print("[ERROR] OpenAI client is not initialized")
+                return None
+                
             print(f"[DEBUG] Generating text with {self.openai_model}, max_tokens={max_tokens}, temp={temperature}")
-            print(f"[DEBUG] Prompt: {prompt[:50]}..." if len(prompt) > 50 else f"[DEBUG] Prompt: {prompt}")
             
-            response = openai.ChatCompletion.create(
+            # Use the new OpenAI API
+            response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 n=1
             )
-            ##deploy
+            
             # Extract the generated text from the response
             generated_text = response.choices[0].message.content
             print(f"[DEBUG] Generation successful: {len(generated_text)} characters")
-            print(f"[DEBUG] First 50 chars: {generated_text[:50]}..." if len(generated_text) > 50 else f"[DEBUG] Content: {generated_text}")
             
             return generated_text
         except Exception as e:
-            print(f"[ERROR] Text generation failed: {e}")
+            print(f"[ERROR] Text generation failed: {type(e).__name__}: {e}")
             return None
-    
-    def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
-        """Generate an email using OpenAI with context from original email."""
-        # Create a prompt for the model with context from original email
-        prompt = f"Write a professional email response. I am Haider Farooq an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done"
-        if recipient_name:
-            prompt += f" to {recipient_name}"
-        if original_subject:
-            prompt += f" regarding '{original_subject}'"
-        
-        # Add context from original email if available
-        if original_content:
-            # Truncate the content if it's too long to fit in the prompt
-            max_context_length = 500
-            context = original_content[:max_context_length] + "..." if len(original_content) > max_context_length else original_content
-            prompt += f"\n\nOriginal email content:\n{context}\n\nWrite a professional and helpful response:"
-        else:
-            prompt += ":\n\n"
-        
-        generated_text = self.generate_text(prompt, max_tokens=500)
-        if not generated_text:
-            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
+    def generate_email(self, recipient_name, original_subject, original_content):
+        """Generate an email response using AI."""
+        try:
+            # Create a prompt for generating an email response
+            prompt = f"""
+            Generate a professional, helpful email response to the following email.
+            Write as if you are me, responding to {recipient_name}.
             
-        # Clean up the generated text to extract only the email body
-        clean_email = self._extract_email_body(generated_text)
-        
-        # Replace [Your Name] placeholder with Emmy
-        clean_email = clean_email.replace("[Your Name]", "Emmy")
-        
-        return clean_email
+            Original email subject: {original_subject}
+            
+            Original email content:
+            {original_content}
+            
+            Create a concise, professional response that addresses their questions or concerns directly.
+            Use a friendly, helpful tone throughout.
+            """
+            
+            # Use the generate_text method with the prompt
+            response = self.generate_text(prompt, max_tokens=800, temperature=0.7)
+            
+            return response
+        except Exception as e:
+            print(f"[ERROR] Failed to generate email response: {e}")
+            return None
     
     def _extract_email_body(self, generated_text):
         """Extract just the email body from the generated text."""
