@@ -62,12 +62,21 @@ class GmailAssistant:
     
     def load_config(self):
         """Load configuration from config.json file."""
+        # First try to load from Streamlit secrets if available
+        try:
+            if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+                if 'config' in st.secrets:
+                    return json.loads(st.secrets['config'])
+        except Exception as e:
+            print(f"Error loading config from Streamlit secrets: {e}")
+        
+        # Fall back to file-based config
         config_path = os.path.join(os.path.dirname(__file__), 'config.json')
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Error loading config: {e}")
+            print(f"Error loading config from file: {e}")
             return {
                 "auto_response": {
                     "enabled": False,
@@ -76,10 +85,19 @@ class GmailAssistant:
                 }
             }
     
-    # Update the authenticate method in your Automation.py
     def authenticate(self):
         """Authenticate with Gmail API and return the service object."""
-        from auth_helper import get_gmail_service
+        from auth_helper import get_gmail_service, is_deployed
+        
+        # If deployed on Streamlit, check if we need special handling
+        if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
+            deployed = is_deployed()
+            if deployed:
+                print("[INFO] Running in deployed environment, using Streamlit secrets for authentication")
+            else:
+                print("[INFO] Running in local Streamlit, using local credentials if available")
+        
+        # Get Gmail service using the updated helper
         return get_gmail_service()
     
     def get_unread_emails(self, max_results=10):

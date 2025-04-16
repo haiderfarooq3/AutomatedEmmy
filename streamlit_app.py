@@ -107,12 +107,30 @@ def authenticate():
     st.session_state.auth_attempted = True
     with st.spinner("Authenticating with Gmail..."):
         try:
+            # Check if we're running in a deployed environment
+            from auth_helper import is_deployed
+            deployed = is_deployed()
+            
+            if deployed:
+                st.info("Running in Streamlit Cloud - using secrets for authentication")
+            
+            # Initialize the assistant, which will trigger authentication
             st.session_state.assistant = GmailAssistant()
+            
+            # Check if authentication was successful
+            if st.session_state.assistant.service is None:
+                st.error("Authentication failed. Please check the authentication status and try again.")
+                return None
+                
             user_email = st.session_state.assistant.get_user_email()
-            st.session_state.authenticated = True
-            # Auto-load emails after successful authentication
-            get_emails()
-            return user_email
+            if user_email:
+                st.session_state.authenticated = True
+                # Auto-load emails after successful authentication
+                get_emails()
+                return user_email
+            else:
+                st.error("Unable to get user email. Authentication may not be complete.")
+                return None
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             st.info("Click 'Troubleshoot Authentication' for help with resolving this issue.")

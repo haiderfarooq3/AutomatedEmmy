@@ -6,7 +6,8 @@ This guide will walk you through the process of deploying your Gmail automation 
 1. [Prerequisites](#prerequisites)
 2. [Local Deployment](#local-deployment)
 3. [Streamlit Cloud Deployment](#streamlit-cloud-deployment)
-4. [Troubleshooting](#troubleshooting)
+4. [Handling Authentication in Deployment](#handling-authentication-in-deployment)
+5. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -144,6 +145,42 @@ Since your local secrets won't be uploaded to GitHub, you need to configure them
 2. **Check deployment**:
    - Your app should now be deployed at `https://share.streamlit.io/yourusername/your-repo-name/main/streamlit_app.py`
    - The first time you run the app, you'll need to authenticate with Gmail again
+
+## Handling Authentication in Deployment
+
+When deploying on Streamlit Cloud, token persistence works differently than in local development:
+
+### Preparing Authentication for Deployment
+
+1. **First authenticate locally**:
+   - Run the app locally and authenticate with your Gmail account
+   - This will create the necessary `token.pickle` file
+
+2. **Update your Streamlit secrets with token information**:
+   ```bash
+   python update_streamlit_secrets.py --update-token
+   ```
+   This will extract the token information from `token.pickle` and add it to your `.streamlit/secrets.toml` file.
+
+3. **Export all secrets for deployment**:
+   ```bash
+   python update_streamlit_secrets.py --export-secrets
+   ```
+   This creates a `streamlit_secrets_for_deployment.toml` file with all the necessary secrets.
+
+4. **Add secrets to Streamlit Cloud**:
+   - Copy the contents of `streamlit_secrets_for_deployment.toml`
+   - Go to your app's settings in Streamlit Cloud
+   - Paste the content into the Secrets section
+   - Click "Save"
+
+This setup allows Emmy to authenticate without needing local token.pickle or credentials.json files on the deployed environment.
+
+### Understanding the Authentication Flow
+
+- **Local deployment**: Uses `credentials.json` and `token.pickle` files
+- **Streamlit Cloud**: Uses the credentials and token information from Streamlit secrets
+- In both cases, the app needs to be authorized with your Gmail account
 
 ## Troubleshooting
 
