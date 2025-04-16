@@ -738,12 +738,10 @@ def main():
             for scope in SCOPES:
                 st.markdown(f"- {scope.split('/')[-1]}")
             
-            if st.button("Authenticate with Gmail") or (st.session_state.auth_attempted and not st.session_state.authenticated):
-                user_email = authenticate()
-                if user_email:
-                    st.success(f"Emmy authenticated as: {user_email}")
-                    # We'll reload the page to update the UI
-                    st.session_state.needs_refresh = True
+            if st.button("Authenticate with Gmail"):
+                authenticate()
+                # If authentication was successful, rerun to update UI
+                if st.session_state.get('authenticated', False):
                     st.rerun()
             
             # Show authentication help information
@@ -751,25 +749,12 @@ def main():
                 st.markdown("""
                 **For Streamlit Cloud Deployment:**
                 1. You must have your Google credentials in the secrets.toml file
-                2. You need both credentials_json and token_json configured
+                2. You need to authorize access to your Gmail account
                 3. Contact your administrator if you need help with authentication
                 """)
-            
-            # Show current authentication status
-            if st.session_state.get('auth_status'):
-                st.info(f"Authentication status: {st.session_state.auth_status}")
         else:
             user_email = st.session_state.assistant.get_user_email()
             st.success(f"Emmy authenticated as: {user_email}")
-            
-            # Show authentication help even after successful authentication
-            with st.expander("Authentication Help"):
-                st.markdown("""
-                **For Streamlit Cloud Deployment:**
-                1. You must have your Google credentials in the secrets.toml file
-                2. You need both credentials_json and token_json configured
-                3. Contact your administrator if you need help with authentication
-                """)
     
     # Main content
     if st.session_state.authenticated:

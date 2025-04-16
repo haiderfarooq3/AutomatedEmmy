@@ -112,50 +112,80 @@ class GmailAssistant:
             if is_streamlit:
                 try:
                     import json
-                    import pickle
                     from google.oauth2.credentials import Credentials
                     from googleapiclient.discovery import build
                     from google.auth.transport.requests import Request
+                    from google_auth_oauthlib.flow import Flow
                     
-                    # Try to load existing token from pickle file first (your original approach)
-                    creds = None
-                    token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
-                    
-                    if os.path.exists(token_path):
-                        with open(token_path, 'rb') as token:
-                            creds = pickle.load(token)
-                    
-                    # If credentials don't exist or are invalid, then try to get from secrets
-                    if not creds or not creds.valid:
-                        if creds and creds.expired and creds.refresh_token:
+                    # Check if we have credentials in session state
+                    if 'google_creds' in st.session_state and st.session_state.google_creds:
+                        # Use existing credentials from session state
+                        creds_data = st.session_state.google_creds
+                        
+                        # Create credentials object
+                        creds = Credentials(
+                            token=creds_data.get('token'),
+                            refresh_token=creds_data.get('refresh_token'),
+                            token_uri=creds_data.get('token_uri'),
+                            client_id=creds_data.get('client_id'),
+                            client_secret=creds_data.get('client_secret'),
+                            scopes=creds_data.get('scopes')
+                        )
+                        
+                        # Refresh token if expired
+                        if creds.expired and creds.refresh_token:
                             creds.refresh(Request())
-                        else:
-                            # Get credentials from secrets.toml
-                            try:
-                                # Extract client credentials from secrets
-                                creds_json = json.loads(st.secrets["google"]["credentials_json"])
-                                
-                                # Only update auth_status, do not render any UI
-                                st.session_state.auth_status = "Need to authenticate with Google"
-                                
-                                # Let streamlit_app.py handle the OAuth flow - don't do it here
-                                return None
-                                
-                            except Exception as e:
-                                print(f"[ERROR] Failed to load credentials from secrets: {e}")
-                                return None
+                            # Update token in session state
+                            st.session_state.google_creds['token'] = creds.token
+                        
+                        # Build and return service
+                        service = build('gmail', 'v1', credentials=creds)
+                        return service
                     
-                    # Save credentials for next run
-                    if creds and creds.valid:
-                        with open(token_path, 'wb') as token:
-                            pickle.dump(creds, token)
+                    # Check if we have a code in URL query parameters
+                    if 'code' in st.query_params:
+                        # We have an authorization code - exchange it for tokens
+                        code = st.query_params['code']
+                        
+                        # Get client config from secrets
+                        creds_json = json.loads(st.secrets["google"]["credentials_json"])
+                        
+                        # Create flow to exchange code for credentials
+                        flow = Flow.from_client_config(
+                            client_config=creds_json,
+                            scopes=SCOPES,
+                            redirect_uri=creds_json['web']['redirect_uris'][0]
+                        )
+                        
+                        # Exchange code for tokens
+                        flow.fetch_token(code=code)
+                        creds = flow.credentials
+                        
+                        # Store credentials in session state
+                        st.session_state.google_creds = {
+                            'token': creds.token,
+                            'refresh_token': creds.refresh_token, 
+                            'token_uri': creds.token_uri,
+                            'client_id': creds.client_id,
+                            'client_secret': creds.client_secret,
+                            'scopes': creds.scopes
+                        }
+                        
+                        # Clear URL parameters
+                        st.query_params.clear()
+                        
+                        # Build and return service
+                        service = build('gmail', 'v1', credentials=creds)
+                        return service
                     
-                    # Build the service
-                    service = build('gmail', 'v1', credentials=creds)
-                    return service
+                    # No credentials and no code - need to start OAuth flow
+                    # Update session state but DON'T show UI here
+                    st.session_state.auth_status = "need_oauth"
+                    return None
                     
                 except Exception as e:
                     print(f"[ERROR] Authentication error in Streamlit mode: {e}")
+                    st.session_state.auth_status = f"error: {str(e)}"
                     return None
             else:
                 # Standard authentication flow for local use
@@ -192,6 +222,7 @@ class GmailAssistant:
         except Exception as e:
             print(f"[ERROR] Authentication error: {e}")
             return None
+
     def get_unread_emails(self, max_results=10):
         """Get a list of unread emails."""
         try:
