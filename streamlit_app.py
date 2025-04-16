@@ -99,6 +99,8 @@ def init_session_state():
         st.session_state.debug_info = {}
     if 'debug_send' not in st.session_state:
         st.session_state.debug_send = {}
+    if 'auth_status' not in st.session_state:
+        st.session_state.auth_status = "Not started"
 
 def authenticate():
     """Authenticate the Gmail assistant and load emails automatically."""
@@ -113,6 +115,7 @@ def authenticate():
             return user_email
         except Exception as e:
             st.error(f"Authentication failed: {e}")
+            st.info("Click 'Troubleshoot Authentication' for help with resolving this issue.")
             return None
 
 def setup_model():
@@ -628,6 +631,13 @@ def main():
     """Main function to run the Streamlit app."""
     init_session_state()
     
+    # Check for troubleshooting mode
+    query_params = st.experimental_get_query_params()
+    if 'troubleshoot' in query_params:
+        from troubleshoot import run_troubleshooter
+        run_troubleshooter()
+        return
+    
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
@@ -656,16 +666,32 @@ def main():
             for scope in SCOPES:
                 st.markdown(f"- {scope.split('/')[-1]}")
             
-            if st.button("Authenticate Emmy with Gmail") or (st.session_state.auth_attempted and not st.session_state.authenticated):
-                user_email = authenticate()
-                if user_email:
-                    st.success(f"Emmy authenticated as: {user_email}")
-                    # We'll reload the page to update the UI
-                    st.session_state.needs_refresh = True
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Authenticate Emmy with Gmail") or (st.session_state.auth_attempted and not st.session_state.authenticated):
+                    user_email = authenticate()
+                    if user_email:
+                        st.success(f"Emmy authenticated as: {user_email}")
+                        # We'll reload the page to update the UI
+                        st.session_state.needs_refresh = True
+                        st.rerun()
+            
+            with col2:
+                if st.button("Troubleshoot Authentication"):
+                    st.experimental_set_query_params(troubleshoot=True)
                     st.rerun()
+            
+            # Show current authentication status
+            if st.session_state.get('auth_status'):
+                st.info(f"Authentication status: {st.session_state.auth_status}")
         else:
             user_email = st.session_state.assistant.get_user_email()
             st.success(f"Emmy authenticated as: {user_email}")
+            
+            # Show troubleshooting option even after successful authentication
+            if st.button("Troubleshoot Authentication"):
+                st.experimental_set_query_params(troubleshoot=True)
+                st.rerun()
             
             # OpenAI API settings
             st.markdown("### Emmy's AI Brain")
