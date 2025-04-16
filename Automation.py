@@ -20,7 +20,7 @@ import streamlit as st
 from constants import CATEGORY_DISPLAY_NAMES, AUTO_RESPONSE_CATEGORIES, AUTO_RESPONSE_WAITING_TIMES
 
 # Check if running in Streamlit
-is_streamlit = 'streamlit' in globals()
+is_streamlit = 'streamlit' in sys.modules or 'streamlit._is_running' in sys.modules or 'st' in globals()
 
 # Load environment variables from .env file for local development
 load_dotenv()
@@ -102,113 +102,92 @@ class GmailAssistant:
     def authenticate(self):
         """Authenticate with Gmail API through interactive OAuth flow."""
         try:
-            # More reliable Streamlit detection
-            is_streamlit = ('streamlit' in sys.modules or 
-                            'streamlit._is_running' in sys.modules or
-                            'st' in globals())
+            # Check if we're in a Streamlit environment
+            is_streamlit = (
+                'streamlit' in sys.modules or 
+                'streamlit._is_running' in sys.modules or 
+                'st' in globals()
+            )
             
             if is_streamlit:
                 try:
                     import json
-                    from google_auth_oauthlib.flow import Flow
+                    import pickle
                     from google.oauth2.credentials import Credentials
                     from googleapiclient.discovery import build
                     from google.auth.transport.requests import Request
                     
-                    # Extract client credentials from secrets
-                    creds_json = json.loads(st.secrets["google"]["credentials_json"])
+                    # Try to load existing token from pickle file first (your original approach)
+                    creds = None
+                    token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
                     
-                    # Check if we already have tokens in session state
-                    if 'google_creds' not in st.session_state:
-                        # We need to initiate the OAuth flow
-                        st.session_state.auth_status = "Starting OAuth flow"
-                        print("[INFO] Starting OAuth flow")
-                        
-                        # Create a Flow instance with client credentials from secrets
-                        flow = Flow.from_client_config(
-                            client_config=creds_json,
-                            scopes=SCOPES,
-                            redirect_uri=creds_json['web']['redirect_uris'][0]
-                        )
-                        
-                        # Generate the authorization URL
-                        auth_url, _ = flow.authorization_url(
-                            access_type='offline',
-                            include_granted_scopes='true',
-                            prompt='consent'
-                        )
-                        
-                        # Display the authentication URL for the user to click
-                        st.markdown("### Gmail Authentication Required")
-                        st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
-                        st.markdown(f"[Authenticate with Gmail]({auth_url})")
-                        
-                        # Check if we received an authorization code after redirect
-                        try:
-                            query_params = st.experimental_get_query_params()
-                            if 'code' in query_params:
-                                code = query_params['code'][0]
-                                st.session_state.auth_status = "Code received, exchanging for tokens"
-                                
-                                # Exchange authorization code for tokens
-                                flow.fetch_token(code=code)
-                                creds = flow.credentials
-                                
-                                # Store credentials in session state
-                                st.session_state.google_creds = {
-                                    'token': creds.token,
-                                    'refresh_token': creds.refresh_token,
-                                    'token_uri': creds.token_uri,
-                                    'client_id': creds.client_id,
-                                    'client_secret': creds.client_secret,
-                                    'scopes': creds.scopes
-                                }
-                                
-                                # Clear URL parameters to avoid token reuse
-                                st.experimental_set_query_params()
-                            else:
-                                st.session_state.auth_status = "Waiting for authorization code"
-                                return None  # Still waiting for authorization
-                        except Exception as e:
-                            st.session_state.auth_status = f"Error handling redirect: {str(e)}"
-                            print(f"[ERROR] Error handling redirect: {e}")
-                            return None
+                    if os.path.exists(token_path):
+                        with open(token_path, 'rb') as token:
+                            creds = pickle.load(token)
                     
-                    # If we have credentials, use them
-                    if 'google_creds' in st.session_state:
-                        creds_data = st.session_state.google_creds
-                        
-                        # Create credentials object
-                        creds = Credentials(
-                            token=creds_data['token'],
-                            refresh_token=creds_data['refresh_token'],
-                            token_uri=creds_data['token_uri'],
-                            client_id=creds_data['client_id'],
-                            client_secret=creds_data['client_secret'],
-                            scopes=creds_data['scopes']
-                        )
-                        
-                        # Refresh token if expired
-                        if creds.expired and creds.refresh_token:
+                    # If credentials don't exist or are invalid, then try to get from secrets
+                    if not creds or not creds.valid:
+                        if creds and creds.expired and creds.refresh_token:
                             creds.refresh(Request())
-                            # Update the token in session state
-                            st.session_state.google_creds['token'] = creds.token
-                        
-                        # Build and return Gmail service
-                        service = build('gmail', 'v1', credentials=creds)
-                        return service
-                    else:
-                        st.session_state.auth_status = "No credentials available yet"
-                        return None
+                        else:
+                            # Get credentials from secrets.toml
+                            try:
+                                # Extract client credentials from secrets
+                                creds_json = json.loads(st.secrets["google"]["credentials_json"])
+                                
+                                # Only update auth_status, do not render any UI
+                                st.session_state.auth_status = "Need to authenticate with Google"
+                                
+                                # Let streamlit_app.py handle the OAuth flow - don't do it here
+                                return None
+                                
+                            except Exception as e:
+                                print(f"[ERROR] Failed to load credentials from secrets: {e}")
+                                return None
+                    
+                    # Save credentials for next run
+                    if creds and creds.valid:
+                        with open(token_path, 'wb') as token:
+                            pickle.dump(creds, token)
+                    
+                    # Build the service
+                    service = build('gmail', 'v1', credentials=creds)
+                    return service
                     
                 except Exception as e:
-                    st.session_state.auth_status = f"Authentication error: {str(e)}"
-                    print(f"[ERROR] Authentication error: {e}")
+                    print(f"[ERROR] Authentication error in Streamlit mode: {e}")
                     return None
             else:
-                # Not running in Streamlit - this is a more informative error message
-                print("[ERROR] This application requires Streamlit to run. Please launch with 'streamlit run streamlit_app.py'")
-                return None
+                # Standard authentication flow for local use
+                creds = None
+                token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
+                
+                if os.path.exists(token_path):
+                    with open(token_path, 'rb') as token:
+                        creds = pickle.load(token)
+                
+                # If credentials don't exist or are invalid, go through the flow
+                if not creds or not creds.valid:
+                    if creds and creds.expired and creds.refresh_token:
+                        creds.refresh(Request())
+                    else:
+                        # Get credentials.json from current directory
+                        creds_path = os.path.join(os.path.dirname(__file__), 'credentials.json')
+                        
+                        if not os.path.exists(creds_path):
+                            print(f"[ERROR] credentials.json not found at {creds_path}")
+                            return None
+                        
+                        flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
+                        creds = flow.run_local_server(port=8080)
+                    
+                    # Save the credentials for the next run
+                    with open(token_path, 'wb') as token:
+                        pickle.dump(creds, token)
+                
+                # Build the service
+                service = build('gmail', 'v1', credentials=creds)
+                return service
                     
         except Exception as e:
             print(f"[ERROR] Authentication error: {e}")

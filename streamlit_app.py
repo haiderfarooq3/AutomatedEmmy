@@ -116,33 +116,87 @@ def authenticate():
     st.session_state.auth_attempted = True
     with st.spinner("Authenticating with Gmail..."):
         try:
-            # Check if we're running in a deployed environment
-            deployed = is_deployed()
+            # Check if we already have a valid assistant
+            if 'assistant' in st.session_state and st.session_state.assistant and st.session_state.assistant.service:
+                user_email = st.session_state.assistant.get_user_email()
+                if user_email:
+                    st.session_state.authenticated = True
+                    return user_email
             
-            if deployed:
-                st.info("Running in Streamlit Cloud - using secrets for authentication")
+            # Initialize the assistant
+            if 'assistant' not in st.session_state or st.session_state.assistant is None:
+                st.session_state.assistant = GmailAssistant()
             
-            # Initialize the assistant, which will trigger authentication
-            st.session_state.assistant = GmailAssistant()
-            
-            # Check if authentication was successful
+            # If service is None, we need to complete OAuth
             if st.session_state.assistant.service is None:
-                st.error("Authentication failed. Please check the authentication status and try again.")
-                return None
+                # Import required libraries for OAuth
+                import json
+                from google_auth_oauthlib.flow import Flow
+                from google.oauth2.credentials import Credentials
+                import pickle
                 
-            user_email = st.session_state.assistant.get_user_email()
-            if user_email:
-                st.session_state.authenticated = True
-                # Auto-load emails after successful authentication
-                get_emails()
-                return user_email
+                # Get client config from secrets
+                creds_json = json.loads(st.secrets["google"]["credentials_json"])
+                
+                # Create a Flow instance
+                flow = Flow.from_client_config(
+                    client_config=creds_json,
+                    scopes=SCOPES,
+                    redirect_uri=creds_json['web']['redirect_uris'][0]
+                )
+                
+                # Check if we have a code in the URL
+                if 'code' in st.query_params:
+                    code = st.query_params['code']
+                    
+                    # Exchange authorization code for tokens
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
+                    
+                    # Save credentials to pickle file (original approach)
+                    token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
+                    with open(token_path, 'wb') as token:
+                        pickle.dump(creds, token)
+                    
+                    # Clear the URL parameters
+                    st.query_params.clear()
+                    
+                    # Reinitialize the assistant with the new token
+                    st.session_state.assistant = GmailAssistant()
+                    
+                    if st.session_state.assistant.service:
+                        user_email = st.session_state.assistant.get_user_email()
+                        if user_email:
+                            st.session_state.authenticated = True
+                            get_emails()  # Auto-load emails
+                            return user_email
+                else:
+                    # Generate the authorization URL
+                    auth_url, _ = flow.authorization_url(
+                        access_type='offline',
+                        include_granted_scopes='true',
+                        prompt='consent'
+                    )
+                    
+                    # Display the authentication URL for the user to click
+                    st.markdown("### Gmail Authentication Required")
+                    st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
+                    st.markdown(f"[Authenticate with Gmail]({auth_url})")
+                    return None
             else:
-                st.error("Unable to get user email. Authentication may not be complete.")
-                return None
+                # We have a service, so we're authenticated
+                user_email = st.session_state.assistant.get_user_email()
+                if user_email:
+                    st.session_state.authenticated = True
+                    get_emails()  # Auto-load emails
+                    return user_email
+                else:
+                    st.error("Unable to get user email. Authentication may not be complete.")
+                    return None
+                
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             return None
-
 def setup_model():
     """Set up the OpenAI model."""
     if not st.session_state.hf_model_loaded:
