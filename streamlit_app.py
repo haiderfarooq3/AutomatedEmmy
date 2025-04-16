@@ -111,6 +111,7 @@ def is_deployed():
     except Exception:
         return False
 
+
 def authenticate():
     """Authenticate the Gmail assistant and load emails automatically."""
     st.session_state.auth_attempted = True
@@ -132,8 +133,6 @@ def authenticate():
                 # Import required libraries for OAuth
                 import json
                 from google_auth_oauthlib.flow import Flow
-                from google.oauth2.credentials import Credentials
-                import pickle
                 
                 # Get client config from secrets
                 creds_json = json.loads(st.secrets["google"]["credentials_json"])
@@ -153,10 +152,15 @@ def authenticate():
                     flow.fetch_token(code=code)
                     creds = flow.credentials
                     
-                    # Save credentials to pickle file (original approach)
-                    token_path = os.path.join(os.path.dirname(__file__), 'token.pickle')
-                    with open(token_path, 'wb') as token:
-                        pickle.dump(creds, token)
+                    # Save credentials to session state
+                    st.session_state.google_creds = {
+                        'token': creds.token,
+                        'refresh_token': creds.refresh_token,
+                        'token_uri': creds.token_uri,
+                        'client_id': creds.client_id,
+                        'client_secret': creds.client_secret,
+                        'scopes': creds.scopes
+                    }
                     
                     # Clear the URL parameters
                     st.query_params.clear()
@@ -178,10 +182,27 @@ def authenticate():
                         prompt='consent'
                     )
                     
-                    # Display the authentication URL for the user to click
+                    # Display authentication button that opens in SAME tab
                     st.markdown("### Gmail Authentication Required")
                     st.markdown("Click the button below to authorize Emmy to access your Gmail account:")
-                    st.markdown(f"[Authenticate with Gmail]({auth_url})")
+                    
+                    # Create a button that uses window.location.href to navigate in same tab
+                    st.markdown(f"""
+                    <div style="text-align: center; margin-top: 20px;">
+                        <a href="{auth_url}" target="_self" style="
+                            text-decoration: none;
+                            background-color: #FF4B4B;
+                            color: white;
+                            padding: 10px 20px;
+                            border-radius: 5px;
+                            font-weight: bold;
+                            display: inline-block;
+                        ">
+                            Authenticate with Gmail
+                        </a>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
                     return None
             else:
                 # We have a service, so we're authenticated
@@ -197,6 +218,7 @@ def authenticate():
         except Exception as e:
             st.error(f"Authentication failed: {e}")
             return None
+
 def setup_model():
     """Set up the OpenAI model."""
     if not st.session_state.hf_model_loaded:
@@ -710,6 +732,12 @@ def main():
     """Main function to run the Streamlit app."""
     init_session_state()
     
+    if 'code' in st.query_params and not st.session_state.authenticated:
+        with st.spinner("Completing authentication..."):
+            authenticate()
+            if st.session_state.authenticated:
+                st.rerun()
+
     # Header with Emmy branding
     st.markdown("<h1 class='main-header'>Emmy</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Intelligent Email Assistant</p>", unsafe_allow_html=True)
@@ -732,12 +760,14 @@ def main():
             st.warning("Logo image not found. Please make sure 'Logo.png' exists in the application directory.")
         
         # Authentication section
+        # In your sidebar code where you show the authenticate button:
         if not st.session_state.authenticated:
             st.markdown("### Authentication")
             st.markdown(f"Emmy needs access to your Gmail account with the following permissions:")
             for scope in SCOPES:
                 st.markdown(f"- {scope.split('/')[-1]}")
             
+            # Use custom HTML for the button to ensure it opens in the same tab
             if st.button("Authenticate with Gmail"):
                 authenticate()
                 # If authentication was successful, rerun to update UI

@@ -582,30 +582,35 @@ class GmailAssistant:
         except Exception as e:
             print(f"[ERROR] Text generation failed: {type(e).__name__}: {e}")
             return None
-    def generate_email(self, recipient_name, original_subject, original_content):
-        """Generate an email response using AI."""
-        try:
-            # Create a prompt for generating an email response
-            prompt = f"""
-            Generate a professional, helpful email response to the following email.
-            Write as if you are me, responding to {recipient_name}.
+    def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
+        """Generate an email using OpenAI with context from original email."""
+        # Create a prompt for the model with context from original email
+        prompt = f"Write a professional email response. I am Haider Farooq an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done"
+        if recipient_name:
+            prompt += f" to {recipient_name}"
+        if original_subject:
+            prompt += f" regarding '{original_subject}'"
+        
+        # Add context from original email if available
+        if original_content:
+            # Truncate the content if it's too long to fit in the prompt
+            max_context_length = 500
+            context = original_content[:max_context_length] + "..." if len(original_content) > max_context_length else original_content
+            prompt += f"\n\nOriginal email content:\n{context}\n\nWrite a professional and helpful response:"
+        else:
+            prompt += ":\n\n"
+        
+        generated_text = self.generate_text(prompt, max_tokens=500)
+        if not generated_text:
+            return f"Thank you for your email regarding '{original_subject}'. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
             
-            Original email subject: {original_subject}
-            
-            Original email content:
-            {original_content}
-            
-            Create a concise, professional response that addresses their questions or concerns directly.
-            Use a friendly, helpful tone throughout.
-            """
-            
-            # Use the generate_text method with the prompt
-            response = self.generate_text(prompt, max_tokens=800, temperature=0.7)
-            
-            return response
-        except Exception as e:
-            print(f"[ERROR] Failed to generate email response: {e}")
-            return None
+        # Clean up the generated text to extract only the email body
+        clean_email = self._extract_email_body(generated_text)
+        
+        # Replace [Your Name] placeholder with Emmy
+        clean_email = clean_email.replace("[Your Name]", "Emmy")
+        
+        return clean_email
     
     def _extract_email_body(self, generated_text):
         """Extract just the email body from the generated text."""
