@@ -147,7 +147,7 @@ def authenticate():
                 # Set the explicit callback URL for the deployed app
                 # This should match what you've set in your Google Cloud Console
                 domain = "automatedemmy.streamlit.app"  # Change this if your domain is different
-                redirect_uri = f"https://automatedemmy.streamlit.app/oauth_callback.html"
+                redirect_uri = f"https://automatedemmy.streamlit.app/static/oauth_callback.html"
                 
                 # Create a Flow instance
                 flow = Flow.from_client_config(
