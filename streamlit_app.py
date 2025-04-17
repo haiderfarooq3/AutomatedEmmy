@@ -405,43 +405,126 @@ def cancel_response():
     st.session_state.generated_response = None
     st.rerun()  # Update UI immediately
 
-def update_config(auto_respond_enabled, auto_respond_categories, waiting_time, user_name=None):
-    """Update the configuration file with new auto-response settings."""
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+def update_config(auto_respond_enabled, auto_respond_categories, waiting_time, user_name=None, custom_prompt=None):
+    """Update the configuration in Streamlit secrets or session state."""
     try:
-        # Read current config
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-        else:
-            config = {}
+        # Initialize an in-memory config that will mirror what would be in secrets
+        config = {
+            "auto_response": {
+                "enabled": auto_respond_enabled,
+                "categories": auto_respond_categories, 
+                "waiting_time": waiting_time
+            },
+            "user": {}
+        }
         
-        # Update auto-response settings
-        if 'auto_response' not in config:
-            config['auto_response'] = {}
-        
-        config['auto_response']['enabled'] = auto_respond_enabled
-        config['auto_response']['categories'] = auto_respond_categories
-        config['auto_response']['waiting_time'] = waiting_time
-        
-        # Update user name if provided
+        # Update user settings if provided
         if user_name:
-            if 'user' not in config:
-                config['user'] = {}
-            config['user']['name'] = user_name
+            config["user"]["name"] = user_name
+            
+        # Update custom prompt if provided
+        if custom_prompt:
+            config["user"]["custom_prompt"] = custom_prompt
         
-        # Write updated config
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=4)
+        # Store in session state (this won't persist between sessions, but works for demo)
+        st.session_state.config_override = config
         
-        # Also update the assistant's config if it exists
+        # If we have an assistant instance, update its config directly
         if st.session_state.assistant:
-            st.session_state.assistant.config = config
+            # Merge the existing config with our updates
+            current_config = st.session_state.assistant.config or {}
+            
+            # Update auto-response settings
+            if 'auto_response' not in current_config:
+                current_config['auto_response'] = {}
+            current_config['auto_response']['enabled'] = auto_respond_enabled
+            current_config['auto_response']['categories'] = auto_respond_categories
+            current_config['auto_response']['waiting_time'] = waiting_time
+            
+            # Update user settings
+            if 'user' not in current_config:
+                current_config['user'] = {}
+            if user_name:
+                current_config['user']['name'] = user_name
+            if custom_prompt:
+                current_config['user']['custom_prompt'] = custom_prompt
+            
+            # Set the updated config on the assistant
+            st.session_state.assistant.config = current_config
         
         return True
     except Exception as e:
         st.error(f"Error updating config: {e}")
         return False
+
+def get_current_config():
+    """Get the current configuration from session state or defaults."""
+    try:
+        # If we have an override in session state, use that
+        if 'config_override' in st.session_state:
+            return st.session_state.config_override
+        
+        # If we have an assistant with config, use that
+        if hasattr(st.session_state, 'assistant') and st.session_state.assistant and hasattr(st.session_state.assistant, 'config'):
+            return st.session_state.assistant.config
+        
+        # Try to get from secrets
+        if 'config' in st.secrets:
+            config = {}
+            
+            # Get auto_response settings
+            if 'auto_response' in st.secrets.config:
+                config['auto_response'] = {
+                    'enabled': st.secrets.config.auto_response.get('enabled', False),
+                    'categories': st.secrets.config.auto_response.get('categories', 'Priority Inbox Only'),
+                    'waiting_time': st.secrets.config.auto_response.get('waiting_time', 5)
+                }
+            else:
+                config['auto_response'] = {
+                    'enabled': False,
+                    'categories': 'Priority Inbox Only',
+                    'waiting_time': 5
+                }
+            
+            # Get user settings
+            if 'user' in st.secrets.config:
+                config['user'] = {
+                    'name': st.secrets.config.user.get('name', 'Emmy User'),
+                    'custom_prompt': st.secrets.config.user.get('custom_prompt', None)
+                }
+            else:
+                config['user'] = {
+                    'name': 'Emmy User',
+                    'custom_prompt': None
+                }
+            
+            return config
+        
+        # Return defaults if nothing else is available
+        return {
+            "auto_response": {
+                "enabled": False,
+                "categories": "Priority Inbox Only",
+                "waiting_time": 5
+            },
+            "user": {
+                "name": "Emmy User",
+                "custom_prompt": "Write a professional email response. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
+            }
+        }
+    except Exception as e:
+        st.error(f"Error loading config: {e}")
+        return {
+            "auto_response": {
+                "enabled": False,
+                "categories": "Priority Inbox Only",
+                "waiting_time": 5
+            },
+            "user": {
+                "name": "Emmy User",
+                "custom_prompt": "Write a professional email response. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
+            }
+        }
 
 def run_auto_responses():
     """Run the auto-response logic for unprocessed emails."""
@@ -519,30 +602,6 @@ def run_auto_responses():
         except Exception as e:
             st.error(f"Error running auto-responder: {str(e)}")
             return False
-
-def get_current_config():
-    """Get the current configuration from the config file."""
-    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                return json.load(f)
-        return {
-            "auto_response": {
-                "enabled": False,
-                "categories": "Priority Inbox Only",
-                "waiting_time": 5
-            }
-        }
-    except Exception as e:
-        st.error(f"Error loading config: {e}")
-        return {
-            "auto_response": {
-                "enabled": False,
-                "categories": "Priority Inbox Only",
-                "waiting_time": 5
-            }
-        }
 
 def display_emails():
     """Display sorted emails in tabs."""
@@ -797,8 +856,8 @@ def main():
         if not st.session_state.hf_model_loaded:
             setup_model()
             
-        # Content tabs
-        tab1, tab2 = st.tabs(["Emmy Dashboard", "Auto-Response Settings"])
+        # Content tabs - add a new tab for user profile
+        tab1, tab2, tab3 = st.tabs(["Emmy Dashboard", "Auto-Response Settings", "User Profile"])
         
         with tab1:
             # If we've authenticated but haven't loaded emails yet, load them automatically
@@ -926,6 +985,55 @@ def main():
                             st.session_state.assistant.config = get_current_config()
                     else:
                         st.error("Failed to update settings")
+        
+        with tab3:
+            st.markdown("### Your Profile Settings")
+            st.markdown("Customize how Emmy represents you in emails")
+            
+            # Load current config for default values
+            current_config = get_current_config()
+            user_config = current_config.get('user', {})
+            
+            # Display name setting
+            user_name = st.text_input(
+                "Your Display Name (used in email signatures)", 
+                value=user_config.get('name', ''),
+                key="user_display_name"
+            )
+            
+            # Custom prompt setting
+            st.markdown("#### Custom Email Style")
+            st.markdown("""
+            Provide details about yourself and how you want Emmy to represent you when replying to emails.
+            For example: "Write a professional email response. I am a marketing manager specializing in digital campaigns."
+            """)
+            
+            default_prompt = "Write a professional email response. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
+            custom_prompt = st.text_area(
+                "Your Custom Style Prompt", 
+                value=user_config.get('custom_prompt', default_prompt),
+                height=150,
+                key="custom_prompt_input",
+                help="This prompt guides Emmy on how to write emails on your behalf"
+            )
+            
+            # Save button
+            if st.button("Save Profile Settings", key="save_profile"):
+                success = update_config(
+                    current_config.get('auto_response', {}).get('enabled', False),
+                    current_config.get('auto_response', {}).get('categories', 'Priority Inbox Only'),
+                    current_config.get('auto_response', {}).get('waiting_time', 5),
+                    user_name=user_name,
+                    custom_prompt=custom_prompt
+                )
+                
+                if success:
+                    st.success("Profile settings saved successfully!")
+                    # Reload the assistant to pick up new settings
+                    if hasattr(st.session_state, 'assistant') and st.session_state.assistant:
+                        st.session_state.assistant.config = get_current_config()
+                else:
+                    st.error("Failed to save profile settings")
     else:
         st.info("Please authenticate Emmy with your Gmail account using the button in the sidebar to get started.")
 

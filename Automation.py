@@ -61,24 +61,25 @@ class GmailAssistant:
         self.config = self.load_config()
         
     def load_config(self):
-        """Load configuration from Streamlit secrets."""
+        """Load configuration from Streamlit secrets or fallback to defaults."""
         try:
             if 'streamlit' in globals() or 'streamlit._is_running' in sys.modules:
                 config = {}
                 
-                # Get auto_response settings
+                # Get auto_response settings from st.secrets
                 if 'config' in st.secrets:
                     if 'auto_response' in st.secrets.config:
                         config['auto_response'] = {
-                            'enabled': st.secrets.config.auto_response.enabled,
-                            'categories': st.secrets.config.auto_response.categories,
-                            'waiting_time': st.secrets.config.auto_response.waiting_time
+                            'enabled': st.secrets.config.auto_response.get('enabled', False),
+                            'categories': st.secrets.config.auto_response.get('categories', 'Priority Inbox Only'),
+                            'waiting_time': st.secrets.config.auto_response.get('waiting_time', 5)
                         }
                     
-                    # Get user settings
+                    # Get user settings from st.secrets
                     if 'user' in st.secrets.config:
                         config['user'] = {
-                            'name': st.secrets.config.user.name
+                            'name': st.secrets.config.user.get('name', 'Emmy User'),
+                            'custom_prompt': st.secrets.config.user.get('custom_prompt', None)
                         }
                 
                 # Return the constructed config
@@ -95,7 +96,8 @@ class GmailAssistant:
                 "waiting_time": 5
             },
             "user": {
-                "name": "Emmy User"
+                "name": "Emmy User",
+                "custom_prompt": "Write a professional email response. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
             }
         }
             
@@ -584,8 +586,12 @@ class GmailAssistant:
             return None
     def generate_email(self, topic=None, recipient_name=None, original_subject=None, original_content=None):
         """Generate an email using OpenAI with context from original email."""
+        # Get custom prompt from config, or use default if not set
+        user_prompt = self.config.get('user', {}).get('custom_prompt', 
+            "Write a professional email response. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately.")
+        
         # Create a prompt for the model with context from original email
-        prompt = f"Write a professional email response. I am Qasim Khursheed an SEO Marketer for service based businesses looking over local seo, GMB, backlinks, organic reach. reply to emails accordingly. Make sure proper formatting is done. DO NOT include the subject line in the email body as it will be added separately."
+        prompt = user_prompt
         if recipient_name:
             prompt += f" to {recipient_name}"
         if original_subject:
@@ -602,13 +608,14 @@ class GmailAssistant:
         
         generated_text = self.generate_text(prompt, max_tokens=500)
         if not generated_text:
-            return f"Thank you for your email. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\nEmmy"
+            return f"Thank you for your email. I've received your message and will get back to you with a more detailed response soon.\n\nBest regards,\n{self.get_user_name()}"
             
         # Clean up the generated text to extract only the email body
         clean_email = self._extract_email_body(generated_text)
         
-        # Replace [Your Name] placeholder with Emmy
-        clean_email = clean_email.replace("[Your Name]", "Emmy")
+        # Replace [Your Name] placeholder with user's name
+        user_name = self.get_user_name()
+        clean_email = clean_email.replace("[Your Name]", user_name)
         
         return clean_email
     
